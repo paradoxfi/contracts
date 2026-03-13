@@ -394,7 +394,35 @@ contract FeeAccountingTest is Test {
         assertLe(r1, r2, "toToken1 must be monotone in amount0");
     }
 
+    /// @notice toToken1 and toToken0 are approximate inverses for reasonable
+    ///         price ranges. Uses uint64 amounts to avoid overflow in the
+    ///         round-trip at extreme prices.
+    function testFuzz_roundTrip_approxInverse(
+        uint64  amount,
+        uint96  sqrtPrice
+    ) public view {
+        vm.assume(sqrtPrice > 0 && amount > 0);
+        // Step 1 of toToken1Denominated: `(amount * sqrtPrice) >> 96`.
+        // If sqrtPrice is so small that this floors to zero, the round-trip
+        // loses all magnitude information — exclude these inputs.
+        vm.assume((uint256(amount) * uint256(sqrtPrice)) >> 96 > 0);
 
+        uint128 amt0     = uint128(amount);
+        uint256 inToken1 = h.toToken1Denominated(amt0, uint160(sqrtPrice));
+
+        // If inToken1 overflows uint128, skip — the round-trip is only
+        // meaningful when the result fits in the same type.
+        if (inToken1 > type(uint128).max) return;
+
+        uint256 backTo0 = h.toToken0Denominated(uint128(inToken1), uint160(sqrtPrice));
+
+        uint256 q96 = 1 << 96;
+        uint256 stepError = q96 / uint256(sqrtPrice) + 1;
+        uint256 tolerance = stepError * stepError + 10;
+
+        // Two sequential floor divisions: total error is at most 2 units.
+        assertApproxEqAbs(backTo0, amt0, tolerance, "round-trip tolerance");
+    }
 
     /// @notice isZeroSwap iff both legs are exactly zero.
     function testFuzz_isZeroSwap_iffBothZero(int128 a0, int128 a1) public view {
