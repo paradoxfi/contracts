@@ -6,12 +6,12 @@ import {
     Ownable
 } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
-import {Test}    from "forge-std/Test.sol";
-import {PoolId}  from "v4-core/types/PoolId.sol";
+import {Test} from "forge-std/Test.sol";
+import {PoolId} from "v4-core/types/PoolId.sol";
 
-import {ERC20}   from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {AuthorizedCaller} from "../../src/libraries/AuthorizedCaller.sol";
-import {YieldRouter}  from "../../src/core/YieldRouter.sol";
+import {YieldRouter} from "../../src/core/YieldRouter.sol";
 import {EpochManager} from "../../src/core/EpochManager.sol";
 
 /// @title YieldRouterTest
@@ -50,39 +50,51 @@ contract MockEpochManager {
     // No-op — YieldRouter stores this address but doesn't call it in ingest/finalize.
 }
 
+contract MockMaturityVault {
+    function receiveSettlement(
+        uint256 epochId,
+        address token,
+        uint128 fytTotal,
+        uint128 vytTotal
+    ) external {}
+}
+
 // =============================================================================
 // Test contract
 // =============================================================================
 
 contract YieldRouterTest is Test {
-
     // -------------------------------------------------------------------------
     // Fixtures
     // -------------------------------------------------------------------------
 
-    YieldRouter      internal yr;
-    MockERC20        internal token;
+    YieldRouter internal yr;
+    MockERC20 internal token;
     MockEpochManager internal mockEM;
 
-    address internal constant OWNER  = address(0xA110CE);
-    address internal constant HOOK   = address(0xB00C);
-    address internal constant VAULT  = address(0xDEAD);
-    address internal constant ALICE  = address(0xA11CE);
+    address internal constant OWNER = address(0xA110CE);
+    address internal constant HOOK = address(0xB00C);
+    address internal constant ALICE = address(0xA11CE);
+    address internal VAULT;
 
-    PoolId  internal POOL;
+    PoolId internal POOL;
 
     // A non-zero epochId (as EpochId.encode() would produce).
-    uint256 internal constant EPOCH_ID = (uint256(1) << 192) | (uint256(42) << 32) | uint256(0);
+    uint256 internal constant EPOCH_ID =
+        (uint256(1) << 192) | (uint256(42) << 32) | uint256(0);
 
     uint256 internal constant WAD = 1e18;
 
     function setUp() public {
         vm.chainId(1);
 
-        token   = new MockERC20();
-        mockEM  = new MockEpochManager();
+        token = new MockERC20();
+        mockEM = new MockEpochManager();
 
         yr = new YieldRouter(OWNER, HOOK, EpochManager(address(mockEM)));
+
+        MockMaturityVault mockVault = new MockMaturityVault();
+        VAULT = address(mockVault);
 
         vm.prank(OWNER);
         yr.setMaturityVault(VAULT);
@@ -102,10 +114,9 @@ contract YieldRouterTest is Test {
     }
 
     /// Call finalizeEpoch and return SettlementAmounts.
-    function _finalize(uint128 obligation)
-        internal
-        returns (YieldRouter.SettlementAmounts memory)
-    {
+    function _finalize(
+        uint128 obligation
+    ) internal returns (YieldRouter.SettlementAmounts memory) {
         vm.prank(HOOK);
         return yr.finalizeEpoch(EPOCH_ID, POOL, address(token), obligation);
     }
@@ -145,7 +156,10 @@ contract YieldRouterTest is Test {
     function test_setBufferSkimRate_belowMinReverts() public {
         vm.prank(OWNER);
         vm.expectRevert(
-            abi.encodeWithSelector(YieldRouter.SkimRateOutOfBounds.selector, 0.04e18)
+            abi.encodeWithSelector(
+                YieldRouter.SkimRateOutOfBounds.selector,
+                0.04e18
+            )
         );
         yr.setBufferSkimRate(0.04e18);
     }
@@ -153,7 +167,10 @@ contract YieldRouterTest is Test {
     function test_setBufferSkimRate_aboveMaxReverts() public {
         vm.prank(OWNER);
         vm.expectRevert(
-            abi.encodeWithSelector(YieldRouter.SkimRateOutOfBounds.selector, 0.26e18)
+            abi.encodeWithSelector(
+                YieldRouter.SkimRateOutOfBounds.selector,
+                0.26e18
+            )
         );
         yr.setBufferSkimRate(0.26e18);
     }
@@ -173,28 +190,28 @@ contract YieldRouterTest is Test {
     /// (No surplus so no skim, no variable.)
     function test_ingest_partialFixedFill() public {
         uint128 obligation = 100e18;
-        uint128 fee        = 60e18;
+        uint128 fee = 60e18;
 
         _ingest(fee, obligation);
 
         YieldRouter.EpochBalance memory bal = yr.getEpochBalance(EPOCH_ID);
-        assertEq(bal.fixedAccrued,    60e18);
+        assertEq(bal.fixedAccrued, 60e18);
         assertEq(bal.variableAccrued, 0);
-        assertEq(bal.reserveContrib,  0);
+        assertEq(bal.reserveContrib, 0);
     }
 
     /// Scenario: obligation = 100, fee = 100 (exactly covered).
     /// fixedFill = 100, skim = 0, variable = 0.
     function test_ingest_exactCoverage_noSurplus() public {
         uint128 obligation = 100e18;
-        uint128 fee        = 100e18;
+        uint128 fee = 100e18;
 
         _ingest(fee, obligation);
 
         YieldRouter.EpochBalance memory bal = yr.getEpochBalance(EPOCH_ID);
-        assertEq(bal.fixedAccrued,    100e18);
+        assertEq(bal.fixedAccrued, 100e18);
         assertEq(bal.variableAccrued, 0);
-        assertEq(bal.reserveContrib,  0);
+        assertEq(bal.reserveContrib, 0);
     }
 
     /// Scenario: obligation = 100, fee = 200.
@@ -203,14 +220,14 @@ contract YieldRouterTest is Test {
     /// variable = 90.
     function test_ingest_surplusTriggersSkimAndVariable() public {
         uint128 obligation = 100e18;
-        uint128 fee        = 200e18;
+        uint128 fee = 200e18;
 
         _ingest(fee, obligation);
 
         YieldRouter.EpochBalance memory bal = yr.getEpochBalance(EPOCH_ID);
-        assertEq(bal.fixedAccrued,    100e18);
+        assertEq(bal.fixedAccrued, 100e18);
         assertEq(bal.variableAccrued, 90e18);
-        assertEq(bal.reserveContrib,  10e18);
+        assertEq(bal.reserveContrib, 10e18);
         assertEq(yr.getReserveBuffer(POOL), 10e18);
     }
 
@@ -225,9 +242,9 @@ contract YieldRouterTest is Test {
         _ingest(80e18, obligation);
 
         YieldRouter.EpochBalance memory bal = yr.getEpochBalance(EPOCH_ID);
-        assertEq(bal.fixedAccrued,    100e18);          // 60 + 40
-        assertEq(bal.variableAccrued, 36e18);           // 40 - 4
-        assertEq(bal.reserveContrib,  4e18);            // 10% of 40
+        assertEq(bal.fixedAccrued, 100e18); // 60 + 40
+        assertEq(bal.variableAccrued, 36e18); // 40 - 4
+        assertEq(bal.reserveContrib, 4e18); // 10% of 40
         assertEq(yr.getReserveBuffer(POOL), 4e18);
     }
 
@@ -240,16 +257,16 @@ contract YieldRouterTest is Test {
         _ingest(200e18, obligation); // all surplus: skim=20, variable=180
 
         YieldRouter.EpochBalance memory bal = yr.getEpochBalance(EPOCH_ID);
-        assertEq(bal.fixedAccrued,    100e18);
+        assertEq(bal.fixedAccrued, 100e18);
         assertEq(bal.variableAccrued, 180e18);
-        assertEq(bal.reserveContrib,  20e18);
+        assertEq(bal.reserveContrib, 20e18);
         assertEq(yr.getReserveBuffer(POOL), 20e18);
     }
 
     /// heldFees tracks cumulative gross receipts.
     function test_ingest_heldFeesAccumulates() public {
-        _ingest(60e18,  100e18);
-        _ingest(80e18,  100e18);
+        _ingest(60e18, 100e18);
+        _ingest(80e18, 100e18);
 
         assertEq(yr.getHeldFees(POOL, address(token)), 140e18);
     }
@@ -275,7 +292,7 @@ contract YieldRouterTest is Test {
         _ingest(200e18, 100e18); // surplus = 100, skim = 20, variable = 80
 
         YieldRouter.EpochBalance memory bal = yr.getEpochBalance(EPOCH_ID);
-        assertEq(bal.reserveContrib,  20e18);
+        assertEq(bal.reserveContrib, 20e18);
         assertEq(bal.variableAccrued, 80e18);
     }
 
@@ -284,9 +301,9 @@ contract YieldRouterTest is Test {
         _ingest(100e18, 0);
 
         YieldRouter.EpochBalance memory bal = yr.getEpochBalance(EPOCH_ID);
-        assertEq(bal.fixedAccrued,    0);
+        assertEq(bal.fixedAccrued, 0);
         // skim = 100 × 10% = 10, variable = 90
-        assertEq(bal.reserveContrib,  10e18);
+        assertEq(bal.reserveContrib, 10e18);
         assertEq(bal.variableAccrued, 90e18);
     }
 
@@ -302,7 +319,7 @@ contract YieldRouterTest is Test {
 
         assertEq(result.fytAmount, 100e18);
         assertEq(result.vytAmount, 90e18);
-        assertEq(result.zone,      0);
+        assertEq(result.zone, 0);
     }
 
     function test_finalizeEpoch_zoneA_transfersToVault() public {
@@ -366,12 +383,16 @@ contract YieldRouterTest is Test {
         // fixedAccrued=80, shortfall=5, buffer=10 ≥ 5 → Zone B
 
         vm.prank(HOOK);
-        YieldRouter.SettlementAmounts memory result =
-            yr.finalizeEpoch(epochB, POOL, address(token), 85e18);
+        YieldRouter.SettlementAmounts memory result = yr.finalizeEpoch(
+            epochB,
+            POOL,
+            address(token),
+            85e18
+        );
 
         assertEq(result.fytAmount, 85e18); // made whole
         assertEq(result.vytAmount, 0);
-        assertEq(result.zone,      1);
+        assertEq(result.zone, 1);
     }
 
     function test_finalizeEpoch_zoneB_bufferDecremented() public {
@@ -405,7 +426,7 @@ contract YieldRouterTest is Test {
         // FYT gets fixedAccrued (60) + buffer (0) = 60.
         assertEq(result.fytAmount, 60e18);
         assertEq(result.vytAmount, 0);
-        assertEq(result.zone,      2);
+        assertEq(result.zone, 2);
     }
 
     function test_finalizeEpoch_zoneC_bufferDepleted() public {
@@ -420,13 +441,17 @@ contract YieldRouterTest is Test {
         yr.ingest(epoch2, POOL, address(token), 40e18, 100e18);
 
         vm.prank(HOOK);
-        YieldRouter.SettlementAmounts memory result =
-            yr.finalizeEpoch(epoch2, POOL, address(token), 100e18);
+        YieldRouter.SettlementAmounts memory result = yr.finalizeEpoch(
+            epoch2,
+            POOL,
+            address(token),
+            100e18
+        );
 
         // FYT gets 40 + 10 (full buffer) = 50.
         assertEq(result.fytAmount, 50e18);
         assertEq(result.vytAmount, 0);
-        assertEq(result.zone,      2);
+        assertEq(result.zone, 2);
         assertEq(yr.getReserveBuffer(POOL), 0); // fully depleted
     }
 
@@ -446,12 +471,15 @@ contract YieldRouterTest is Test {
     function test_preview_matchesActualZoneA() public {
         _ingest(200e18, 100e18);
 
-        YieldRouter.SettlementAmounts memory preview =
-            yr.previewFinalization(EPOCH_ID, POOL, 100e18);
+        YieldRouter.SettlementAmounts memory preview = yr.previewFinalization(
+            EPOCH_ID,
+            POOL,
+            100e18
+        );
 
         assertEq(preview.fytAmount, 100e18);
         assertEq(preview.vytAmount, 90e18);
-        assertEq(preview.zone,      0);
+        assertEq(preview.zone, 0);
     }
 
     function test_preview_noStateChange() public {
@@ -482,7 +510,11 @@ contract YieldRouterTest is Test {
 
     function test_finalizeEpoch_noVaultReverts() public {
         // Deploy a fresh router with no vault set.
-        YieldRouter yr2 = new YieldRouter(OWNER, HOOK, EpochManager(address(mockEM)));
+        YieldRouter yr2 = new YieldRouter(
+            OWNER,
+            HOOK,
+            EpochManager(address(mockEM))
+        );
 
         token.mint(address(yr2), 100e18);
         vm.prank(HOOK);
@@ -508,11 +540,15 @@ contract YieldRouterTest is Test {
 
         YieldRouter.EpochBalance memory bal = yr.getEpochBalance(EPOCH_ID);
 
-        uint256 total = uint256(bal.fixedAccrued)
-                      + uint256(bal.variableAccrued)
-                      + uint256(bal.reserveContrib);
+        uint256 total = uint256(bal.fixedAccrued) +
+            uint256(bal.variableAccrued) +
+            uint256(bal.reserveContrib);
 
-        assertEq(total, uint256(fee), "waterfall must exhaust feeAmount exactly");
+        assertEq(
+            total,
+            uint256(fee),
+            "waterfall must exhaust feeAmount exactly"
+        );
     }
 
     /// Zone classification is consistent: Zone A iff fixedAccrued >= obligation.
@@ -525,14 +561,19 @@ contract YieldRouterTest is Test {
 
         _ingest(uint128(fee), uint128(obligation));
 
-        YieldRouter.SettlementAmounts memory preview =
-            yr.previewFinalization(EPOCH_ID, POOL, uint128(obligation));
+        YieldRouter.SettlementAmounts memory preview = yr.previewFinalization(
+            EPOCH_ID,
+            POOL,
+            uint128(obligation)
+        );
 
         YieldRouter.EpochBalance memory bal = yr.getEpochBalance(EPOCH_ID);
 
         if (bal.fixedAccrued >= uint128(obligation)) {
             assertEq(preview.zone, 0, "should be Zone A");
-        } else if (yr.getReserveBuffer(POOL) >= uint128(obligation) - bal.fixedAccrued) {
+        } else if (
+            yr.getReserveBuffer(POOL) >= uint128(obligation) - bal.fixedAccrued
+        ) {
             assertEq(preview.zone, 1, "should be Zone B");
         } else {
             assertEq(preview.zone, 2, "should be Zone C");
@@ -549,11 +590,17 @@ contract YieldRouterTest is Test {
 
         _ingest(uint128(fee), uint128(obligation));
 
-        YieldRouter.SettlementAmounts memory preview =
-            yr.previewFinalization(EPOCH_ID, POOL, uint128(obligation));
+        YieldRouter.SettlementAmounts memory preview = yr.previewFinalization(
+            EPOCH_ID,
+            POOL,
+            uint128(obligation)
+        );
 
-        assertLe(preview.fytAmount, uint128(obligation),
-            "FYT must never exceed obligation");
+        assertLe(
+            preview.fytAmount,
+            uint128(obligation),
+            "FYT must never exceed obligation"
+        );
     }
 
     /// VYT is non-zero iff Zone A.
@@ -566,8 +613,11 @@ contract YieldRouterTest is Test {
 
         _ingest(uint128(fee), uint128(obligation));
 
-        YieldRouter.SettlementAmounts memory preview =
-            yr.previewFinalization(EPOCH_ID, POOL, uint128(obligation));
+        YieldRouter.SettlementAmounts memory preview = yr.previewFinalization(
+            EPOCH_ID,
+            POOL,
+            uint128(obligation)
+        );
 
         if (preview.zone != 0) {
             assertEq(preview.vytAmount, 0, "VYT must be zero outside Zone A");

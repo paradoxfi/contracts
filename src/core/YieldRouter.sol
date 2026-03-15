@@ -9,6 +9,7 @@ import {PoolId}  from "v4-core/types/PoolId.sol";
 
 import {AuthorizedCaller} from "../libraries/AuthorizedCaller.sol";
 import {EpochManager} from "./EpochManager.sol";
+import {IMaturityVault} from "../interfaces/IMaturityVault.sol";
 
 /// @title YieldRouter
 /// @notice Receives all fee income from the hook and routes it through a
@@ -370,13 +371,16 @@ contract YieldRouter is ReentrancyGuard, Ownable2Step, AuthorizedCaller {
         // Transfer to MaturityVault. Two separate transfers so MaturityVault
         // can account for FYT and VYT pools independently. If vytAmount is 0
         // we skip the second transfer to save gas.
-        address vault = maturityVault;
         if (result.fytAmount > 0) {
-            IERC20(token).safeTransfer(vault, result.fytAmount);
+            IERC20(token).safeTransfer(maturityVault, result.fytAmount);
         }
         if (result.vytAmount > 0) {
-            IERC20(token).safeTransfer(vault, result.vytAmount);
+            IERC20(token).safeTransfer(maturityVault, result.vytAmount);
         }
+
+        IMaturityVault(maturityVault).receiveSettlement(
+            epochId, token, result.fytAmount, result.vytAmount
+        );
 
         emit EpochFinalized(epochId, poolId, result.fytAmount, result.vytAmount, result.zone);
     }
