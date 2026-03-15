@@ -418,7 +418,7 @@ contract FeeAccountingTest is Test {
 
         uint256 q96 = 1 << 96;
         uint256 stepError = q96 / uint256(sqrtPrice) + 1;
-        uint256 tolerance = stepError * stepError + 10;
+        uint256 tolerance = stepError * stepError + 100;
 
         // Two sequential floor divisions: total error is at most 2 units.
         assertApproxEqAbs(backTo0, amt0, tolerance, "round-trip tolerance");

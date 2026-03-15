@@ -5,10 +5,11 @@ import {
     Ownable2Step,
     Ownable
 } from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import {Test}   from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {PoolId} from "v4-core/types/PoolId.sol";
 
-import {PositionId}      from "../../src/libraries/PositionId.sol";
+import {AuthorizedCaller} from "../../src/libraries/AuthorizedCaller.sol";
+import {PositionId} from "../../src/libraries/PositionId.sol";
 import {PositionManager} from "../../src/core/PositionManager.sol";
 
 /// @title PositionManagerTest
@@ -26,7 +27,6 @@ import {PositionManager} from "../../src/core/PositionManager.sol";
 ///   Section H  — fuzz
 
 contract PositionManagerTest is Test {
-
     // -------------------------------------------------------------------------
     // Fixtures
     // -------------------------------------------------------------------------
@@ -34,21 +34,22 @@ contract PositionManagerTest is Test {
     PositionManager internal pm;
 
     address internal constant OWNER = address(0xA110CE);
-    address internal constant HOOK  = address(0xB00C);
+    address internal constant HOOK = address(0xB00C);
     address internal constant ALICE = address(0xA11CE);
-    address internal constant BOB   = address(0xB0B);
+    address internal constant BOB = address(0xB0B);
 
     PoolId internal POOL_A;
     PoolId internal POOL_B;
 
     // Canonical mint inputs.
-    int24   internal constant TICK_LOWER  = -100;
-    int24   internal constant TICK_UPPER  = 100;
-    uint128 internal constant LIQUIDITY   = 1_000_000e18;
-    uint128 internal constant NOTIONAL    = 5_000e18;
-    uint64  internal constant FIXED_RATE  = 0.05e18; // 5% WAD
+    int24 internal constant TICK_LOWER = -100;
+    int24 internal constant TICK_UPPER = 100;
+    uint128 internal constant LIQUIDITY = 1_000_000e18;
+    uint128 internal constant NOTIONAL = 5_000e18;
+    uint64 internal constant FIXED_RATE = 0.05e18; // 5% WAD
     // epochId: any non-zero value (EpochManager produces these; we don't recompute here)
-    uint256 internal constant EPOCH_ID    = (uint256(1) << 192) | (uint256(1) << 32); // chain=1, pool≠0, idx=0
+    uint256 internal constant EPOCH_ID =
+        (uint256(1) << 192) | (uint256(1) << 32); // chain=1, pool≠0, idx=0
 
     uint64 internal constant T0 = 1_700_000_000;
 
@@ -68,18 +69,32 @@ contract PositionManagerTest is Test {
 
     function _mint(address recipient) internal returns (uint256) {
         vm.prank(HOOK);
-        return pm.mint(
-            recipient, POOL_A, EPOCH_ID,
-            TICK_LOWER, TICK_UPPER, LIQUIDITY, NOTIONAL, FIXED_RATE
-        );
+        return
+            pm.mint(
+                recipient,
+                POOL_A,
+                EPOCH_ID,
+                TICK_LOWER,
+                TICK_UPPER,
+                LIQUIDITY,
+                NOTIONAL,
+                FIXED_RATE
+            );
     }
 
     function _mint(address recipient, PoolId pool) internal returns (uint256) {
         vm.prank(HOOK);
-        return pm.mint(
-            recipient, pool, EPOCH_ID,
-            TICK_LOWER, TICK_UPPER, LIQUIDITY, NOTIONAL, FIXED_RATE
-        );
+        return
+            pm.mint(
+                recipient,
+                pool,
+                EPOCH_ID,
+                TICK_LOWER,
+                TICK_UPPER,
+                LIQUIDITY,
+                NOTIONAL,
+                FIXED_RATE
+            );
     }
 
     // =========================================================================
@@ -95,12 +110,17 @@ contract PositionManagerTest is Test {
     }
 
     function test_deploy_zeroOwnerReverts() public {
-        vm.expectRevert(PositionManager.ZeroAddress.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Ownable.OwnableInvalidOwner.selector,
+                address(0)
+            )
+        );
         new PositionManager(address(0), HOOK);
     }
 
     function test_deploy_nameAndSymbol() public view {
-        assertEq(pm.name(),   "Paradox Fi Position");
+        assertEq(pm.name(), "Paradox Fi Position");
         assertEq(pm.symbol(), "PDX-POS");
     }
 
@@ -114,28 +134,25 @@ contract PositionManagerTest is Test {
         vm.prank(ALICE);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Ownable.OwnableInvalidOwner.selector,
+                Ownable.OwnableUnauthorizedAccount.selector,
                 ALICE
             )
         );
         pm.setAuthorizedCaller(ALICE);
     }
 
-    function test_mint_ownerCanAlsoMint() public {
-        vm.prank(OWNER);
-        uint256 pid = pm.mint(
-            ALICE, POOL_A, EPOCH_ID,
-            TICK_LOWER, TICK_UPPER, LIQUIDITY, NOTIONAL, FIXED_RATE
-        );
-        assertEq(pm.ownerOf(pid), ALICE);
-    }
-
     function test_mint_unauthorizedReverts() public {
         vm.prank(ALICE);
-        vm.expectRevert(PositionManager.NotAuthorized.selector);
+        vm.expectRevert(AuthorizedCaller.NotAuthorized.selector);
         pm.mint(
-            ALICE, POOL_A, EPOCH_ID,
-            TICK_LOWER, TICK_UPPER, LIQUIDITY, NOTIONAL, FIXED_RATE
+            ALICE,
+            POOL_A,
+            EPOCH_ID,
+            TICK_LOWER,
+            TICK_UPPER,
+            LIQUIDITY,
+            NOTIONAL,
+            FIXED_RATE
         );
     }
 
@@ -153,12 +170,12 @@ contract PositionManagerTest is Test {
         PositionManager.Position memory pos = pm.getPosition(pid);
 
         assertEq(PoolId.unwrap(pos.poolId), PoolId.unwrap(POOL_A));
-        assertEq(pos.epochId,       EPOCH_ID);
-        assertEq(pos.tickLower,     TICK_LOWER);
-        assertEq(pos.tickUpper,     TICK_UPPER);
-        assertEq(pos.liquidity,     LIQUIDITY);
-        assertEq(pos.notional,      NOTIONAL);
-        assertEq(pos.fixedRate,     FIXED_RATE);
+        assertEq(pos.epochId, EPOCH_ID);
+        assertEq(pos.tickLower, TICK_LOWER);
+        assertEq(pos.tickUpper, TICK_UPPER);
+        assertEq(pos.liquidity, LIQUIDITY);
+        assertEq(pos.notional, NOTIONAL);
+        assertEq(pos.fixedRate, FIXED_RATE);
         assertEq(pos.mintTimestamp, T0);
         assertFalse(pos.exited);
     }
@@ -174,7 +191,7 @@ contract PositionManagerTest is Test {
     function test_mint_counterIndependentAcrossPools() public {
         _mint(ALICE, POOL_A);
         _mint(ALICE, POOL_A);
-        _mint(BOB,   POOL_B);
+        _mint(BOB, POOL_B);
 
         assertEq(pm.poolCounter(POOL_A), 2);
         assertEq(pm.poolCounter(POOL_B), 1);
@@ -183,10 +200,23 @@ contract PositionManagerTest is Test {
     function test_mint_emitsEvent() public {
         vm.prank(HOOK);
         vm.expectEmit(false, true, true, true);
-        emit PositionManager.PositionMinted(0, ALICE, POOL_A, EPOCH_ID, NOTIONAL, FIXED_RATE);
+        emit PositionManager.PositionMinted(
+            0,
+            ALICE,
+            POOL_A,
+            EPOCH_ID,
+            NOTIONAL,
+            FIXED_RATE
+        );
         pm.mint(
-            ALICE, POOL_A, EPOCH_ID,
-            TICK_LOWER, TICK_UPPER, LIQUIDITY, NOTIONAL, FIXED_RATE
+            ALICE,
+            POOL_A,
+            EPOCH_ID,
+            TICK_LOWER,
+            TICK_UPPER,
+            LIQUIDITY,
+            NOTIONAL,
+            FIXED_RATE
         );
     }
 
@@ -204,8 +234,14 @@ contract PositionManagerTest is Test {
         vm.prank(HOOK);
         vm.expectRevert(PositionManager.ZeroAddress.selector);
         pm.mint(
-            address(0), POOL_A, EPOCH_ID,
-            TICK_LOWER, TICK_UPPER, LIQUIDITY, NOTIONAL, FIXED_RATE
+            address(0),
+            POOL_A,
+            EPOCH_ID,
+            TICK_LOWER,
+            TICK_UPPER,
+            LIQUIDITY,
+            NOTIONAL,
+            FIXED_RATE
         );
     }
 
@@ -213,8 +249,14 @@ contract PositionManagerTest is Test {
         vm.prank(HOOK);
         vm.expectRevert(PositionManager.ZeroLiquidity.selector);
         pm.mint(
-            ALICE, POOL_A, EPOCH_ID,
-            TICK_LOWER, TICK_UPPER, 0, NOTIONAL, FIXED_RATE
+            ALICE,
+            POOL_A,
+            EPOCH_ID,
+            TICK_LOWER,
+            TICK_UPPER,
+            0,
+            NOTIONAL,
+            FIXED_RATE
         );
     }
 
@@ -222,8 +264,14 @@ contract PositionManagerTest is Test {
         vm.prank(HOOK);
         vm.expectRevert(PositionManager.ZeroNotional.selector);
         pm.mint(
-            ALICE, POOL_A, EPOCH_ID,
-            TICK_LOWER, TICK_UPPER, LIQUIDITY, 0, FIXED_RATE
+            ALICE,
+            POOL_A,
+            EPOCH_ID,
+            TICK_LOWER,
+            TICK_UPPER,
+            LIQUIDITY,
+            0,
+            FIXED_RATE
         );
     }
 
@@ -296,7 +344,10 @@ contract PositionManagerTest is Test {
         uint256 fake = 99999;
         vm.prank(HOOK);
         vm.expectRevert(
-            abi.encodeWithSelector(PositionManager.PositionDoesNotExist.selector, fake)
+            abi.encodeWithSelector(
+                PositionManager.PositionDoesNotExist.selector,
+                fake
+            )
         );
         pm.markExited(fake);
     }
@@ -309,7 +360,10 @@ contract PositionManagerTest is Test {
 
         vm.prank(HOOK);
         vm.expectRevert(
-            abi.encodeWithSelector(PositionManager.PositionAlreadyExited.selector, pid)
+            abi.encodeWithSelector(
+                PositionManager.PositionAlreadyExited.selector,
+                pid
+            )
         );
         pm.markExited(pid);
     }
@@ -318,7 +372,7 @@ contract PositionManagerTest is Test {
         uint256 pid = _mint(ALICE);
 
         vm.prank(ALICE);
-        vm.expectRevert(PositionManager.NotAuthorized.selector);
+        vm.expectRevert(AuthorizedCaller.NotAuthorized.selector);
         pm.markExited(pid);
     }
 
@@ -351,7 +405,10 @@ contract PositionManagerTest is Test {
 
     function test_getPosition_revertsForUnknown() public {
         vm.expectRevert(
-            abi.encodeWithSelector(PositionManager.PositionDoesNotExist.selector, 42)
+            abi.encodeWithSelector(
+                PositionManager.PositionDoesNotExist.selector,
+                42
+            )
         );
         pm.getPosition(42);
     }
@@ -400,17 +457,11 @@ contract PositionManagerTest is Test {
         vm.prank(ALICE);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Ownable.OwnableInvalidOwner.selector,
+                Ownable.OwnableUnauthorizedAccount.selector,
                 ALICE
             )
         );
         pm.transferOwnership(ALICE);
-    }
-
-    function test_ownershipTransfer_zeroAddressReverts() public {
-        vm.prank(OWNER);
-        vm.expectRevert(PositionManager.ZeroAddress.selector);
-        pm.transferOwnership(address(0));
     }
 
     function test_acceptOwnership_nonPendingReverts() public {
@@ -418,7 +469,14 @@ contract PositionManagerTest is Test {
         pm.transferOwnership(ALICE);
 
         vm.prank(BOB);
-        vm.expectRevert(PositionManager.NotAuthorized.selector);
+        
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Ownable.OwnableUnauthorizedAccount.selector,
+                BOB
+            )
+        );
+
         pm.acceptOwnership();
     }
 
@@ -456,11 +514,11 @@ contract PositionManagerTest is Test {
 
     /// @notice Stored fields exactly match the inputs for any valid mint.
     function testFuzz_mint_fieldsMatchInputs(
-        int24   tickLow,
-        int24   tickHigh,
+        int24 tickLow,
+        int24 tickHigh,
         uint128 liq,
         uint128 notional,
-        uint64  rate
+        uint64 rate
     ) public {
         vm.assume(liq > 0);
         vm.assume(notional > 0);
@@ -468,17 +526,23 @@ contract PositionManagerTest is Test {
 
         vm.prank(HOOK);
         uint256 pid = pm.mint(
-            ALICE, POOL_A, EPOCH_ID,
-            tickLow, tickHigh, liq, notional, rate
+            ALICE,
+            POOL_A,
+            EPOCH_ID,
+            tickLow,
+            tickHigh,
+            liq,
+            notional,
+            rate
         );
 
         PositionManager.Position memory pos = pm.getPosition(pid);
 
-        assertEq(pos.tickLower,  tickLow);
-        assertEq(pos.tickUpper,  tickHigh);
-        assertEq(pos.liquidity,  liq);
-        assertEq(pos.notional,   notional);
-        assertEq(pos.fixedRate,  rate);
+        assertEq(pos.tickLower, tickLow);
+        assertEq(pos.tickUpper, tickHigh);
+        assertEq(pos.liquidity, liq);
+        assertEq(pos.notional, notional);
+        assertEq(pos.fixedRate, rate);
         assertFalse(pos.exited);
     }
 }

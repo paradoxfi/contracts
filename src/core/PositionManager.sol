@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import {PoolId}  from "v4-core/types/PoolId.sol";
+import {
+    Ownable2Step,
+    Ownable
+} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {PoolId} from "v4-core/types/PoolId.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 
+import {AuthorizedCaller} from "../libraries/AuthorizedCaller.sol";
 import {PositionId} from "../libraries/PositionId.sol";
 
 /// @title PositionManager
@@ -62,7 +66,7 @@ import {PositionId} from "../libraries/PositionId.sol";
 /// All view functions — unrestricted
 ///
 /// Owner can update authorizedCaller and transfer ownership (two-step).
-contract PositionManager is ERC721, Ownable2Step {
+contract PositionManager is ERC721, Ownable2Step, AuthorizedCaller {
     using PositionId for uint256;
 
     // =========================================================================
@@ -82,14 +86,14 @@ contract PositionManager is ERC721, Ownable2Step {
     /// exact packing is compiler-managed; we annotate the layout for auditors.
     struct Position {
         /// @notice The Uniswap v4 pool this deposit belongs to.
-        PoolId  poolId;
+        PoolId poolId;
         /// @notice The EpochId (= FYT tokenId) for the epoch this deposit
         ///         was assigned to at mint time.
         uint256 epochId;
         /// @notice Lower tick of the LP range.
-        int24   tickLower;
+        int24 tickLower;
         /// @notice Upper tick of the LP range.
-        int24   tickUpper;
+        int24 tickUpper;
         /// @notice Uniswap v4 liquidity units at deposit time.
         uint128 liquidity;
         /// @notice Token0-denominated notional value at deposit price.
@@ -98,12 +102,12 @@ contract PositionManager is ERC721, Ownable2Step {
         uint128 notional;
         /// @notice Annualised fixed rate locked in at mint time (WAD = 1e18).
         ///         Sourced from EpochManager at the time of deposit.
-        uint64  fixedRate;
+        uint64 fixedRate;
         /// @notice block.timestamp at mint.
-        uint64  mintTimestamp;
+        uint64 mintTimestamp;
         /// @notice True after the LP removes all liquidity.
         ///         Set by markExited(); never unset.
-        bool    exited;
+        bool exited;
     }
 
     // =========================================================================
@@ -118,10 +122,6 @@ contract PositionManager is ERC721, Ownable2Step {
     ///      Starts at 0; first real counter passed to encode() is 1.
     mapping(bytes32 => uint32) private _counters;
 
-    /// @notice Address authorised to call mint() and markExited().
-    ///         Set to ParadoxHook in production.
-    address public authorizedCaller;
-
     // =========================================================================
     // Events
     // =========================================================================
@@ -130,25 +130,19 @@ contract PositionManager is ERC721, Ownable2Step {
     event PositionMinted(
         uint256 indexed positionId,
         address indexed owner,
-        PoolId  indexed poolId,
-        uint256         epochId,
-        uint128         notional,
-        uint64          fixedRate
+        PoolId indexed poolId,
+        uint256 epochId,
+        uint128 notional,
+        uint64 fixedRate
     );
 
     /// @notice Emitted when an LP removes liquidity and the position is closed.
-    event PositionExited(
-        uint256 indexed positionId,
-        address indexed owner
-    );
-
-    event AuthorizedCallerSet(address indexed previous, address indexed next);
+    event PositionExited(uint256 indexed positionId, address indexed owner);
 
     // =========================================================================
     // Errors
     // =========================================================================
 
-    error NotAuthorized();
     error ZeroAddress();
     error ZeroNotional();
     error ZeroLiquidity();
@@ -162,25 +156,15 @@ contract PositionManager is ERC721, Ownable2Step {
     constructor(
         address _owner,
         address _authorizedCaller
-    ) ERC721("Paradox Fi Position", "PDX-POS")  Ownable(_owner) {
-        authorizedCaller = _authorizedCaller;
-    }
-
-    // =========================================================================
-    // Modifiers
-    // =========================================================================
-    modifier onlyAuthorized() {
-        if (msg.sender != authorizedCaller) {
-            revert NotAuthorized();
-        }
-        _;
-    }
+    )
+        ERC721("Paradox Fi Position", "PDX-POS")
+        Ownable(_owner)
+        AuthorizedCaller(_authorizedCaller)
+    {}
 
     /// @notice Update the authorized non-owner caller (ParadoxHook).
     function setAuthorizedCaller(address caller) external onlyOwner {
-        address prev = authorizedCaller;
-        authorizedCaller = caller;
-        emit AuthorizedCallerSet(prev, caller);
+        _setAuthorizedCaller(caller);
     }
 
     // =========================================================================
@@ -209,36 +193,36 @@ contract PositionManager is ERC721, Ownable2Step {
     /// @return positionId  The newly minted ERC-721 tokenId.
     function mint(
         address recipient,
-        PoolId  poolId,
+        PoolId poolId,
         uint256 epochId,
-        int24   tickLower,
-        int24   tickUpper,
+        int24 tickLower,
+        int24 tickUpper,
         uint128 liquidity,
         uint128 notional,
-        uint64  fixedRate
+        uint64 fixedRate
     ) external onlyAuthorized returns (uint256 positionId) {
         if (recipient == address(0)) revert ZeroAddress();
-        if (liquidity == 0)          revert ZeroLiquidity();
-        if (notional == 0)           revert ZeroNotional();
+        if (liquidity == 0) revert ZeroLiquidity();
+        if (notional == 0) revert ZeroNotional();
 
         // Derive the positionId using the pool's current counter.
-        bytes32 key     = PoolId.unwrap(poolId);
-        uint32  current = _counters[key];
-        uint32  next    = PositionId.nextCounter(current);
-        _counters[key]  = next;
+        bytes32 key = PoolId.unwrap(poolId);
+        uint32 current = _counters[key];
+        uint32 next = PositionId.nextCounter(current);
+        _counters[key] = next;
 
         positionId = PositionId.encode(poolId, next);
 
         _positions[positionId] = Position({
-            poolId:        poolId,
-            epochId:       epochId,
-            tickLower:     tickLower,
-            tickUpper:     tickUpper,
-            liquidity:     liquidity,
-            notional:      notional,
-            fixedRate:     fixedRate,
+            poolId: poolId,
+            epochId: epochId,
+            tickLower: tickLower,
+            tickUpper: tickUpper,
+            liquidity: liquidity,
+            notional: notional,
+            fixedRate: fixedRate,
             mintTimestamp: uint64(block.timestamp),
-            exited:        false
+            exited: false
         });
 
         _mint(recipient, positionId);
@@ -289,7 +273,9 @@ contract PositionManager is ERC721, Ownable2Step {
 
     /// @notice Return the full Position struct for a given positionId.
     ///         Reverts if the position does not exist.
-    function getPosition(uint256 positionId) external view returns (Position memory) {
+    function getPosition(
+        uint256 positionId
+    ) external view returns (Position memory) {
         if (_ownerOf(positionId) == address(0)) {
             revert PositionDoesNotExist(positionId);
         }
@@ -304,6 +290,8 @@ contract PositionManager is ERC721, Ownable2Step {
 
     /// @notice Return true if the position exists and has not been exited.
     function isActive(uint256 positionId) external view returns (bool) {
-        return _ownerOf(positionId) != address(0) && !_positions[positionId].exited;
+        return
+            _ownerOf(positionId) != address(0) &&
+            !_positions[positionId].exited;
     }
 }
