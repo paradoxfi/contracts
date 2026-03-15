@@ -52,7 +52,7 @@ contract RateOracleTest is Test {
         oracle = new RateOracle(OWNER, HOOK);
         POOL   = PoolId.wrap(keccak256("ETH/USDC 0.05%"));
 
-        vm.prank(OWNER);
+        vm.prank(HOOK);
         oracle.registerPool(POOL);
     }
 
@@ -140,7 +140,7 @@ contract RateOracleTest is Test {
     }
 
     function test_registerPool_duplicateReverts() public {
-        vm.prank(OWNER);
+        vm.prank(HOOK);
         vm.expectRevert(
             abi.encodeWithSelector(RateOracle.PoolAlreadyRegistered.selector, POOL)
         );
@@ -152,8 +152,7 @@ contract RateOracleTest is Test {
         vm.prank(ALICE);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Ownable.OwnableUnauthorizedAccount.selector,
-                ALICE
+                AuthorizedCaller.NotAuthorized.selector
             )
         );
         oracle.registerPool(other);
@@ -290,7 +289,7 @@ contract RateOracleTest is Test {
     function test_getTWAP_higherFeesGiveHigherRate() public {
         // Pool A: 10 fee per interval. Pool B: 20 fee per interval.
         PoolId poolB = PoolId.wrap(keccak256("BTC/ETH 0.3%"));
-        vm.prank(OWNER);
+        vm.prank(HOOK);
         oracle.registerPool(poolB);
 
         vm.prank(OWNER);
@@ -353,7 +352,7 @@ contract RateOracleTest is Test {
     function test_getVolatility_higherVariance_higherSigma() public {
         // Two pools: low variance vs high variance fees.
         PoolId poolB = PoolId.wrap(keccak256("HIGH_VOL"));
-        vm.prank(OWNER);
+        vm.prank(HOOK);
         oracle.registerPool(poolB);
 
         vm.prank(OWNER);
@@ -449,8 +448,8 @@ contract RateOracleTest is Test {
 
         PoolId poolA = PoolId.wrap(keccak256("A"));
         PoolId poolB = PoolId.wrap(keccak256("B"));
-        vm.prank(OWNER); oracle.registerPool(poolA);
-        vm.prank(OWNER); oracle.registerPool(poolB);
+        vm.prank(HOOK); oracle.registerPool(poolA);
+        vm.prank(HOOK); oracle.registerPool(poolB);
         vm.prank(OWNER); oracle.setTwapWindowObservations(3);
 
         uint128 tvl = 1_000_000e18;
@@ -470,8 +469,8 @@ contract RateOracleTest is Test {
 
         PoolId poolA = PoolId.wrap(keccak256("TVL_A"));
         PoolId poolB = PoolId.wrap(keccak256("TVL_B"));
-        vm.prank(OWNER); oracle.registerPool(poolA);
-        vm.prank(OWNER); oracle.registerPool(poolB);
+        vm.prank(HOOK); oracle.registerPool(poolA);
+        vm.prank(HOOK); oracle.registerPool(poolB);
         vm.prank(OWNER); oracle.setTwapWindowObservations(3);
 
         uint128 fee = 100e18;

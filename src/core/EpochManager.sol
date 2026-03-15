@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {
+    Ownable2Step,
+    Ownable
+} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {PoolId} from "v4-core/types/PoolId.sol";
 
-import {IEpochModel}   from "../epochs/IEpochModel.sol";
-import {EpochId}       from "../libraries/EpochId.sol";
+import {IEpochModel} from "../epochs/IEpochModel.sol";
+import {EpochId} from "../libraries/EpochId.sol";
 import {FixedRateMath} from "../libraries/FixedRateMath.sol";
+import {AuthorizedCaller} from "../libraries/AuthorizedCaller.sol";
 
 /// @title EpochManager
 /// @notice Sole source of truth for epoch state transitions in the Paradox Fi
@@ -54,14 +58,16 @@ import {FixedRateMath} from "../libraries/FixedRateMath.sol";
 /// settle              — permissionless (anyone, after maturity)
 /// transferOwnership   — owner only (two-step)
 /// setAuthorizedCaller — owner only
-contract EpochManager is Ownable2Step {
-
+contract EpochManager is Ownable2Step, AuthorizedCaller {
     // =========================================================================
     // Types
     // =========================================================================
 
     /// @notice Lifecycle state of an epoch.
-    enum EpochStatus { ACTIVE, SETTLED }
+    enum EpochStatus {
+        ACTIVE,
+        SETTLED
+    }
 
     /// @notice All persistent state for a single epoch.
     ///
@@ -79,12 +85,12 @@ contract EpochManager is Ownable2Step {
         uint256 epochId;
         /// @notice Full 256-bit PoolId. Not derivable from epochId alone because
         ///         epochId only embeds the lower 160 bits of the PoolId.
-        PoolId  poolId;
+        PoolId poolId;
         /// @notice Unix timestamp when the epoch was opened.
-        uint64  startTime;
+        uint64 startTime;
         /// @notice Unix timestamp when the epoch may be settled. Immutable
         ///         after openEpoch().
-        uint64  maturity;
+        uint64 maturity;
         /// @notice Annualised fixed rate locked in at epoch open (WAD = 1e18).
         uint128 fixedRate;
         /// @notice Sum of all LP notional deposits into this epoch (token0 units).
@@ -114,9 +120,9 @@ contract EpochManager is Ownable2Step {
         uint256 activeEpochId;
         /// @notice Monotonically increasing index used as the epochIndex field
         ///         of the next epochId. 0-based; incremented after each open.
-        uint32  epochCounter;
+        uint32 epochCounter;
         /// @notice True after registerPool() succeeds.
-        bool    registered;
+        bool registered;
     }
 
     // =========================================================================
@@ -129,50 +135,43 @@ contract EpochManager is Ownable2Step {
     /// @dev pool config storage: PoolId.unwrap() → PoolConfig.
     mapping(bytes32 => PoolConfig) private _pools;
 
-    /// @notice Authorized non-owner address that may call openEpoch() and
-    ///         addNotional(). Set to the ParadoxHook address in production.
-    address public authorizedCaller;
-
     // =========================================================================
     // Events
     // =========================================================================
 
     event PoolRegistered(
-        PoolId  indexed poolId,
+        PoolId indexed poolId,
         address indexed model,
-        uint256         alphaWad,
-        uint256         betaWad,
-        uint256         gammaWad
+        uint256 alphaWad,
+        uint256 betaWad,
+        uint256 gammaWad
     );
 
     event EpochOpened(
         uint256 indexed epochId,
-        PoolId  indexed poolId,
-        uint64          startTime,
-        uint64          maturity,
-        uint128         fixedRate
+        PoolId indexed poolId,
+        uint64 startTime,
+        uint64 maturity,
+        uint128 fixedRate
     );
 
     event EpochSettled(
         uint256 indexed epochId,
-        PoolId  indexed poolId,
-        uint128         totalNotional,
-        uint64          settledAt
+        PoolId indexed poolId,
+        uint128 totalNotional,
+        uint64 settledAt
     );
 
     event NotionalAdded(
         uint256 indexed epochId,
-        uint128         delta,
-        uint128         newTotal
+        uint128 delta,
+        uint128 newTotal
     );
-
-    event AuthorizedCallerSet(address indexed previous, address indexed next);
 
     // =========================================================================
     // Errors
     // =========================================================================
 
-    error NotAuthorized();
     error ZeroAddress();
     error PoolAlreadyRegistered(PoolId poolId);
     error PoolNotRegistered(PoolId poolId);
@@ -188,25 +187,14 @@ contract EpochManager is Ownable2Step {
     // Constructor
     // =========================================================================
 
-    constructor(address _owner, address _authorizedCaller) Ownable(_owner) {
-        authorizedCaller = _authorizedCaller;
-    }
-
-    // =========================================================================
-    // Modifiers
-    // =========================================================================
-    modifier onlyAuthorized() {
-        if (msg.sender != owner() && msg.sender != authorizedCaller) {
-            revert NotAuthorized();
-        }
-        _;
-    }
+    constructor(
+        address _owner,
+        address _authorizedCaller
+    ) Ownable(_owner) AuthorizedCaller(_authorizedCaller) {}
 
     /// @notice Update the authorized non-owner caller (ParadoxHook address).
     function setAuthorizedCaller(address caller) external onlyOwner {
-        address prev = authorizedCaller;
-        authorizedCaller = caller;
-        emit AuthorizedCallerSet(prev, caller);
+        _setAuthorizedCaller(caller);
     }
 
     // =========================================================================
@@ -225,30 +213,36 @@ contract EpochManager is Ownable2Step {
     /// @param betaWad     β weight on volatility discount (WAD, ≤ 1e18).
     /// @param gammaWad    γ weight on utilisation premium (WAD, ≤ 1e18).
     function registerPool(
-        PoolId         poolId,
-        IEpochModel    model,
+        PoolId poolId,
+        IEpochModel model,
         bytes calldata modelParams,
-        uint256        alphaWad,
-        uint256        betaWad,
-        uint256        gammaWad
-    ) external onlyOwner {
+        uint256 alphaWad,
+        uint256 betaWad,
+        uint256 gammaWad
+    ) external onlyAuthorized {
         bytes32 key = PoolId.unwrap(poolId);
-        if (_pools[key].registered)             revert PoolAlreadyRegistered(poolId);
-        if (address(model) == address(0))       revert ZeroAddress();
+        if (_pools[key].registered) revert PoolAlreadyRegistered(poolId);
+        if (address(model) == address(0)) revert ZeroAddress();
         if (!model.validateParams(modelParams)) revert InvalidModelParams();
 
         _pools[key] = PoolConfig({
-            model:         model,
-            modelParams:   modelParams,
-            alphaWad:      alphaWad,
-            betaWad:       betaWad,
-            gammaWad:      gammaWad,
+            model: model,
+            modelParams: modelParams,
+            alphaWad: alphaWad,
+            betaWad: betaWad,
+            gammaWad: gammaWad,
             activeEpochId: EpochId.NULL,
-            epochCounter:  0,
-            registered:    true
+            epochCounter: 0,
+            registered: true
         });
 
-        emit PoolRegistered(poolId, address(model), alphaWad, betaWad, gammaWad);
+        emit PoolRegistered(
+            poolId,
+            address(model),
+            alphaWad,
+            betaWad,
+            gammaWad
+        );
     }
 
     // =========================================================================
@@ -273,7 +267,7 @@ contract EpochManager is Ownable2Step {
     ///                open time; non-zero for autoRoll continuations.
     /// @return epochId The packed identifier for the new epoch.
     function openEpoch(
-        PoolId  poolId,
+        PoolId poolId,
         uint256 twapWad,
         uint256 volWad,
         uint256 utilWad
@@ -305,8 +299,8 @@ contract EpochManager is Ownable2Step {
         bytes32 key = PoolId.unwrap(poolId);
         PoolConfig storage cfg = _pools[key];
 
-        if (!cfg.registered)                    revert PoolNotRegistered(poolId);
-        if (cfg.activeEpochId == EpochId.NULL)  revert EpochNotActive(0);
+        if (!cfg.registered) revert PoolNotRegistered(poolId);
+        if (cfg.activeEpochId == EpochId.NULL) revert EpochNotActive(0);
 
         Epoch storage ep = _epochs[cfg.activeEpochId];
 
@@ -344,19 +338,29 @@ contract EpochManager is Ownable2Step {
         // ep.epochId == NULL means the mapping slot is uninitialised.
         // Real epochIds embed block.chainid (≥ 1) in the upper bits, so NULL == 0
         // is an unambiguous sentinel.
-        if (ep.epochId == EpochId.NULL)        revert EpochDoesNotExist(epochId);
-        if (ep.status == EpochStatus.SETTLED)  revert EpochAlreadySettled(epochId);
+        if (ep.epochId == EpochId.NULL) revert EpochDoesNotExist(epochId);
+        if (ep.status == EpochStatus.SETTLED)
+            revert EpochAlreadySettled(epochId);
         if (block.timestamp < ep.maturity) {
-            revert EpochNotMatured(epochId, ep.maturity, uint64(block.timestamp));
+            revert EpochNotMatured(
+                epochId,
+                ep.maturity,
+                uint64(block.timestamp)
+            );
         }
 
         ep.status = EpochStatus.SETTLED;
 
-        PoolId  poolId = ep.poolId;
-        bytes32 key    = PoolId.unwrap(poolId);
+        PoolId poolId = ep.poolId;
+        bytes32 key = PoolId.unwrap(poolId);
         _pools[key].activeEpochId = EpochId.NULL;
 
-        emit EpochSettled(epochId, poolId, ep.totalNotional, uint64(block.timestamp));
+        emit EpochSettled(
+            epochId,
+            poolId,
+            ep.totalNotional,
+            uint64(block.timestamp)
+        );
 
         // Auto-roll: _openEpochInternal bypasses the access modifier.
         // The authorization to open epochs was established when the first
@@ -375,7 +379,7 @@ contract EpochManager is Ownable2Step {
     /// @dev Core epoch-open logic, without access control.
     ///      Callers must ensure the pool is registered and has no active epoch.
     function _openEpochInternal(
-        PoolId  poolId,
+        PoolId poolId,
         uint256 twapWad,
         uint256 volWad,
         uint256 utilWad
@@ -384,12 +388,16 @@ contract EpochManager is Ownable2Step {
         PoolConfig storage cfg = _pools[key];
 
         uint64 startTime = uint64(block.timestamp);
-        uint64 maturity  = cfg.model.computeMaturity(startTime, cfg.modelParams);
+        uint64 maturity = cfg.model.computeMaturity(startTime, cfg.modelParams);
 
         uint128 fixedRate = uint128(
             FixedRateMath.computeFixedRate(
-                twapWad, volWad, utilWad,
-                cfg.alphaWad, cfg.betaWad, cfg.gammaWad
+                twapWad,
+                volWad,
+                utilWad,
+                cfg.alphaWad,
+                cfg.betaWad,
+                cfg.gammaWad
             )
         );
 
@@ -397,16 +405,16 @@ contract EpochManager is Ownable2Step {
         epochId = EpochId.encode(poolId, index);
 
         cfg.activeEpochId = epochId;
-        cfg.epochCounter  = index + 1;
+        cfg.epochCounter = index + 1;
 
         _epochs[epochId] = Epoch({
-            epochId:       epochId,
-            poolId:        poolId,
-            startTime:     startTime,
-            maturity:      maturity,
-            fixedRate:     fixedRate,
+            epochId: epochId,
+            poolId: poolId,
+            startTime: startTime,
+            maturity: maturity,
+            fixedRate: fixedRate,
             totalNotional: 0,
-            status:        EpochStatus.ACTIVE
+            status: EpochStatus.ACTIVE
         });
 
         emit EpochOpened(epochId, poolId, startTime, maturity, fixedRate);
@@ -424,12 +432,18 @@ contract EpochManager is Ownable2Step {
     }
 
     /// @notice Return top-level pool config fields.
-    function getPoolConfig(PoolId poolId) external view returns (
-        address model,
-        uint256 activeEpochId_,
-        uint32  epochCounter,
-        bool    registered
-    ) {
+    function getPoolConfig(
+        PoolId poolId
+    )
+        external
+        view
+        returns (
+            address model,
+            uint256 activeEpochId_,
+            uint32 epochCounter,
+            bool registered
+        )
+    {
         PoolConfig storage cfg = _pools[PoolId.unwrap(poolId)];
         return (
             address(cfg.model),
@@ -442,10 +456,12 @@ contract EpochManager is Ownable2Step {
     /// @notice Compute the current fixed obligation for an epoch based on its
     ///         stored notional, rate, and full epoch duration.
     ///         Returns 0 for unknown epochIds or epochs with zero notional.
-    function currentObligation(uint256 epochId) external view returns (uint256 obligation) {
+    function currentObligation(
+        uint256 epochId
+    ) external view returns (uint256 obligation) {
         Epoch storage ep = _epochs[epochId];
         if (ep.epochId == EpochId.NULL) return 0;
-        if (ep.totalNotional == 0)      return 0;
+        if (ep.totalNotional == 0) return 0;
 
         uint64 duration = ep.maturity - ep.startTime;
         obligation = FixedRateMath.computeObligation(

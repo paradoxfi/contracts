@@ -183,7 +183,7 @@ contract RateOracle is Ownable2Step, AuthorizedCaller {
     // =========================================================================
 
     /// @notice Register a pool. Must be called before record() for a given pool.
-    function registerPool(PoolId poolId) external onlyOwner {
+    function registerPool(PoolId poolId) external onlyAuthorized {
         bytes32 key = PoolId.unwrap(poolId);
         if (registered[key]) revert PoolAlreadyRegistered(poolId);
         registered[key] = true;

@@ -13,6 +13,7 @@ import {FixedDateEpochModel} from "../../src/epochs/FixedDateEpochModel.sol";
 import {EpochId} from "../../src/libraries/EpochId.sol";
 import {FixedRateMath} from "../../src/libraries/FixedRateMath.sol";
 import {EpochManager} from "../../src/core/EpochManager.sol";
+import {AuthorizedCaller} from "../../src/libraries/AuthorizedCaller.sol";
 
 /// @title EpochManagerTest
 /// @notice Unit and integration tests for EpochManager.
@@ -129,7 +130,7 @@ contract EpochManagerTest is Test {
         MODEL_PARAMS = abi.encode(EPOCH_DURATION);
 
         // Register POOL_A as the default pool for most tests.
-        vm.prank(OWNER);
+        vm.prank(HOOK);
         em.registerPool(POOL_A, fixedModel, MODEL_PARAMS, ALPHA, BETA, GAMMA);
     }
 
@@ -194,16 +195,13 @@ contract EpochManagerTest is Test {
         PoolId other = PoolId.wrap(keccak256("X"));
         vm.prank(ALICE);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                Ownable.OwnableUnauthorizedAccount.selector,
-                ALICE
-            )
+            AuthorizedCaller.NotAuthorized.selector
         );
         em.registerPool(other, fixedModel, MODEL_PARAMS, ALPHA, BETA, GAMMA);
     }
 
     function test_registerPool_duplicateReverts() public {
-        vm.prank(OWNER);
+        vm.prank(HOOK);
         vm.expectRevert(
             abi.encodeWithSelector(
                 EpochManager.PoolAlreadyRegistered.selector,
@@ -215,7 +213,7 @@ contract EpochManagerTest is Test {
 
     function test_registerPool_zeroModelReverts() public {
         PoolId other = PoolId.wrap(keccak256("Y"));
-        vm.prank(OWNER);
+        vm.prank(HOOK);
         vm.expectRevert(EpochManager.ZeroAddress.selector);
         em.registerPool(
             other,
@@ -231,14 +229,14 @@ contract EpochManagerTest is Test {
         PoolId other = PoolId.wrap(keccak256("Z"));
         // FixedDateEpochModel rejects duration = 0.
         bytes memory badParams = abi.encode(uint32(0));
-        vm.prank(OWNER);
+        vm.prank(HOOK);
         vm.expectRevert(EpochManager.InvalidModelParams.selector);
         em.registerPool(other, fixedModel, badParams, ALPHA, BETA, GAMMA);
     }
 
     function test_registerPool_emitsEvent() public {
         PoolId other = PoolId.wrap(keccak256("EVENT_POOL"));
-        vm.prank(OWNER);
+        vm.prank(HOOK);
         vm.expectEmit(true, true, false, true);
         emit EpochManager.PoolRegistered(
             other,
@@ -260,15 +258,9 @@ contract EpochManagerTest is Test {
         assertTrue(eid != EpochId.NULL);
     }
 
-    function test_openEpoch_ownerCanOpen() public {
-        vm.prank(OWNER);
-        uint256 eid = em.openEpoch(POOL_A, TWAP, VOL, UTIL);
-        assertTrue(eid != EpochId.NULL);
-    }
-
     function test_openEpoch_unauthorizedReverts() public {
         vm.prank(ALICE);
-        vm.expectRevert(EpochManager.NotAuthorized.selector);
+        vm.expectRevert(AuthorizedCaller.NotAuthorized.selector);
         em.openEpoch(POOL_A, TWAP, VOL, UTIL);
     }
 
@@ -417,7 +409,7 @@ contract EpochManagerTest is Test {
         em.openEpoch(POOL_A, TWAP, VOL, UTIL);
 
         vm.prank(ALICE);
-        vm.expectRevert(EpochManager.NotAuthorized.selector);
+        vm.expectRevert(AuthorizedCaller.NotAuthorized.selector);
         em.addNotional(POOL_A, 1e18);
     }
 
@@ -520,7 +512,7 @@ contract EpochManagerTest is Test {
     // =========================================================================
 
     function _registerAutoRollPool() internal {
-        vm.prank(OWNER);
+        vm.prank(HOOK);
         em.registerPool(POOL_B, autoRollModel, "", ALPHA, BETA, GAMMA);
     }
 
