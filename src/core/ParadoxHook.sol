@@ -241,7 +241,7 @@ contract ParadoxHook is BaseHook, Ownable {
         PoolKey calldata key,
         uint160,
         int24
-    ) internal override onlyPoolManager returns (bytes4) {
+    ) internal override view onlyPoolManager returns (bytes4) {
         PoolId poolId = key.toId();
 
         if (!registeredPools[poolId]) {
