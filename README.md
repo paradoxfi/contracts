@@ -1,5 +1,7 @@
 # Paradox Fi
 
+<img src="https://github.com/user-attachments/assets/a0df709e-8817-418e-90d0-3e0e241d90e8" width="50%">
+
 **Fixed-income infrastructure for Uniswap v4 liquidity providers.**
 
 Paradox Fi is a Uniswap v4 hook protocol that splits LP fee streams into two tradeable instruments:
