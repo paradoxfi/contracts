@@ -69,12 +69,12 @@ contract MockPoolManager {
         PoolKey calldata,
         ModifyLiquidityParams calldata params,
         bytes calldata data
-    ) external returns (BalanceDelta) {
+    ) external returns (BalanceDelta callerDelta, BalanceDelta feesAccrued) {
         lastLiquidityDelta = params.liquidityDelta;
         if (data.length >= 32) {
             lastRecipient = abi.decode(data, (address));
         }
-        return toBalanceDelta(0, 0);
+        return (toBalanceDelta(0, 0),toBalanceDelta(0, 0));
     }
 
     function setOperator(address, bool) external {}
@@ -189,18 +189,12 @@ abstract contract IntegrationBase is Test {
 
         // Deploy hook at valid permission-encoded address via etch.
         // The runtime bytecode from tempHook has immutables baked in.
-        ParadoxHook tempHook = new ParadoxHook(
-            IPoolManager(address(mockPM)),
-            em,
-            yr,
-            oracle,
-            fyt,
-            vyt,
-            OWNER
+        deployCodeTo(
+            "ParadoxHook.sol",
+            abi.encode(address(mockPM), em, yr, oracle, fyt, vyt, OWNER),
+            HOOK_ADDR
         );
-        vm.etch(HOOK_ADDR, address(tempHook).code);
-        // Copy owner storage slot (slot 0) from tempHook to etched address.
-        vm.store(HOOK_ADDR, bytes32(0), vm.load(address(tempHook), bytes32(0)));
+
         hook = ParadoxHook(HOOK_ADDR);
 
         // Wire authorizations.

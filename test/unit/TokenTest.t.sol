@@ -147,15 +147,17 @@ contract TokenTest is Test {
     }
 
     function test_fyt_adminCanGrantMinterRole() public {
+        bytes32 minterRole = fyt.MINTER_ROLE();
         vm.prank(ADMIN);
-        fyt.grantRole(fyt.MINTER_ROLE(), ALICE);
+        fyt.grantRole(minterRole, ALICE);
         assertTrue(fyt.hasRole(fyt.MINTER_ROLE(), ALICE));
     }
 
     function test_fyt_nonAdminCannotGrantRole() public {
+        bytes32 minterRole = fyt.MINTER_ROLE();
         vm.prank(ALICE);
         vm.expectRevert();
-        fyt.grantRole(fyt.MINTER_ROLE(), ALICE);
+        fyt.grantRole(minterRole, ALICE);
     }
 
     // =========================================================================

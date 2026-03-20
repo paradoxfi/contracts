@@ -48,10 +48,10 @@ create-pool:
 	forge script script/04_CreatePool.s.sol:CreatePool --rpc-url $(RPC_URL) --sender $(SENDER) --etherscan-api-key $(API_KEY) --verify --broadcast
 
 test-demo:
-	forge script script/05_DemoParadoxFi.s.sol:Demo --rpc-url $(RPC_URL) --sender $(SENDER) --etherscan-api-key $(API_KEY)
+	@forge script script/05_DemoParadoxFi.s.sol:Demo --rpc-url $(RPC_URL) --sender $(SENDER) --etherscan-api-key $(API_KEY)
 
 demo:
-	forge script script/05_DemoParadoxFi.s.sol:Demo --rpc-url $(RPC_URL) --sender $(SENDER) --etherscan-api-key $(API_KEY) --verify --broadcast
+	@forge script script/05_DemoParadoxFi.s.sol:Demo --rpc-url $(RPC_URL) --sender $(SENDER) --etherscan-api-key $(API_KEY) --verify --broadcast
 
 redeem-simulation:
-	forge script script/06_RedeemSimulation.s.sol:RedeemSimulation --rpc-url $(RPC_URL) --sender $(SENDER)
+	@forge script script/06_RedeemSimulation.s.sol:RedeemSimulation --rpc-url $(RPC_URL) --sender $(SENDER)

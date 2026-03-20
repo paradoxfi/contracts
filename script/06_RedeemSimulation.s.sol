@@ -144,8 +144,8 @@ contract RedeemSimulation is Script {
 
         console.log("      YieldRouter.finalizeEpoch()  OK");
         console.log("      Zone:          ", _zoneLabel(amounts.zone));
-        console.log("      fytFeeAmount:  ", amounts.fytAmount / 1e18, "tokens");
-        console.log("      vytFeeAmount:  ", amounts.vytAmount / 1e18, "tokens");
+        console.log("      fytFeeAmount:  ", amounts.fytAmount , "tokens");
+        console.log("      vytFeeAmount:  ", amounts.vytAmount , "tokens");
 
         // ── Step 4a: Redeem FYT ───────────────────────────────────────────────
         _redeemFYT(cfg, pos);
@@ -171,8 +171,8 @@ contract RedeemSimulation is Script {
             uint128 fytFeePreview = cfg.mv.previewFYTPayout(cfg.positionId);
             uint128 halfLiquidity = uint128(pos.liquidity / 2);
 
-            console.log("       FYT balance:           ", fytHolding / 1e18, "(halfNotional)");
-            console.log("       Expected fee payout:   ", fytFeePreview / 1e18, "tokens");
+            console.log("       FYT balance:           ", fytHolding , "(halfNotional)");
+            console.log("       Expected fee payout:   ", fytFeePreview , "tokens");
             console.log("       Expected liq removal:  ", halfLiquidity, "units (liquidity/2)");
 
             vm.prank(cfg.holder);
@@ -199,7 +199,7 @@ contract RedeemSimulation is Script {
             uint128 vytLiquidity  = pos.liquidity - uint128(pos.liquidity / 2);
 
             console.log("       VYT balance:           ", vytHolding, "(expect 1)");
-            console.log("       Expected fee payout:   ", vytFeePreview / 1e18, "tokens");
+            console.log("       Expected fee payout:   ", vytFeePreview , "tokens");
             console.log("       Expected liq removal:  ", vytLiquidity, "units (remaining half)");
 
             vm.prank(cfg.holder);
@@ -261,7 +261,7 @@ contract RedeemSimulation is Script {
     {
         if (ep.totalNotional == 0) return 0;
         uint64 duration = ep.maturity - ep.startTime;
-        uint256 step1 = (uint256(ep.totalNotional) * uint256(ep.fixedRate)) / 1e18;
+        uint256 step1 = (uint256(ep.totalNotional) * uint256(ep.fixedRate)) ;
         return (step1 * uint256(duration)) / (365 days);
     }
 
@@ -289,14 +289,14 @@ contract RedeemSimulation is Script {
         console.log("  tickLower:     ", uint256(uint24(pos.tickLower)));
         console.log("  tickUpper:     ", uint256(uint24(pos.tickUpper)));
         console.log("  liquidity:     ", pos.liquidity);
-        console.log("  halfNotional:  ", pos.halfNotional / 1e18, "tokens");
+        console.log("  halfNotional:  ", pos.halfNotional , "tokens");
         console.log("  epochId:       ");
         console.logBytes32(bytes32(epochId));
         console.log("--------------------------------------------------------------");
         console.log("  [EPOCH DATA]");
         console.log("  fixedRate:     ", ep.fixedRate / 1e14, "bps annualised");
         console.log("  maturity:      ", ep.maturity);
-        console.log("  totalNotional: ", ep.totalNotional / 1e18, "tokens");
+        console.log("  totalNotional: ", ep.totalNotional , "tokens");
         console.log("  positions:     ", cfg.fyt.epochPositionCount(epochId));
         console.log("--------------------------------------------------------------");
     }
@@ -321,15 +321,15 @@ contract RedeemSimulation is Script {
             cfg.yr.previewFinalization(epochId, cfg.poolId, uint128(obligation));
 
         console.log("\n  [PRE-SETTLEMENT STATE]");
-        console.log("  token0 balance:       ", token0Bal / 1e18, "tokens");
-        console.log("  FYT balance:          ", fytBal / 1e18, "(halfNotional, positionId key)");
+        console.log("  token0 balance:       ", token0Bal , "tokens");
+        console.log("  FYT balance:          ", fytBal , "(halfNotional, positionId key)");
         console.log("  VYT balance:          ", vytBal, "(1 = held, positionId key)");
         console.log("  ---");
-        console.log("  fixedAccrued:         ", bal.fixedAccrued / 1e18, "tokens");
-        console.log("  variableAccrued:      ", bal.variableAccrued / 1e18, "tokens");
-        console.log("  fixedObligation:      ", obligation / 1e18, "tokens");
+        console.log("  fixedAccrued:         ", bal.fixedAccrued , "tokens");
+        console.log("  variableAccrued:      ", bal.variableAccrued , "tokens");
+        console.log("  fixedObligation:      ", obligation , "tokens");
         console.log("  coverage ratio:       ", coveragePct, "%%");
-        console.log("  reserveBuffer:        ", buffer / 1e18, "tokens");
+        console.log("  reserveBuffer:        ", buffer , "tokens");
         console.log("  projected zone:       ", _zoneLabel(preview.zone));
         console.log("  ---");
         console.log("  [Projected redemption for this position]");
@@ -350,12 +350,12 @@ contract RedeemSimulation is Script {
         uint256 posCount = cfg.fyt.epochPositionCount(epochId);
         uint256 fytFeeEst = posCount > 0 ? uint256(preview.fytAmount) / posCount : 0;
         uint256 vytFeeEst = posCount > 0 ? uint256(preview.vytAmount) / posCount : 0;
-        console.log("  FYT fee est:          ", fytFeeEst / 1e18, "tokens");
-        console.log("  FYT principal (half): ", pos.halfNotional / 1e18, "tokens (approx)");
-        console.log("  VYT fee est:          ", vytFeeEst / 1e18, "tokens");
-        console.log("  VYT principal (half): ", pos.halfNotional / 1e18, "tokens (approx)");
+        console.log("  FYT fee est:          ", fytFeeEst , "tokens");
+        console.log("  FYT principal (half): ", pos.halfNotional , "tokens (approx)");
+        console.log("  VYT fee est:          ", vytFeeEst , "tokens");
+        console.log("  VYT principal (half): ", pos.halfNotional , "tokens (approx)");
         console.log("  Total (approx):       ",
-            (fytFeeEst + vytFeeEst + uint256(pos.halfNotional) * 2) / 1e18, "tokens");
+            (fytFeeEst + vytFeeEst + uint256(pos.halfNotional) * 2) , "tokens");
         console.log("--------------------------------------------------------------");
     }
 
@@ -386,22 +386,22 @@ contract RedeemSimulation is Script {
         console.log("\n==============================================================");
         console.log("  SIMULATION RESULTS");
         console.log("==============================================================");
-        console.log("  token0 before:      ", token0BalBefore / 1e18, "tokens");
-        console.log("  token0 after:       ", token0BalAfter  / 1e18, "tokens");
+        console.log("  token0 before:      ", token0BalBefore , "tokens");
+        console.log("  token0 after:       ", token0BalAfter  , "tokens");
         if (token0Delta >= 0) {
-            console.log("  token0 received:   +", uint256(token0Delta) / 1e18, "tokens");
+            console.log("  token0 received:   +", uint256(token0Delta) , "tokens");
         } else {
-            console.log("  token0 change:     -", uint256(-token0Delta) / 1e18, "tokens");
+            console.log("  token0 change:     -", uint256(-token0Delta) , "tokens");
         }
         console.log("  ---");
-        console.log("  FYT burned:         ", fytBalBefore / 1e18, "-> 0 (halfNotional burned)");
+        console.log("  FYT burned:         ", fytBalBefore , "-> 0 (halfNotional burned)");
         console.log("  VYT burned:         ", vytBalBefore, "-> 0");
         console.log("  FYT after:          ", fytBalAfter,  "(expect 0)");
         console.log("  VYT after:          ", vytBalAfter,  "(expect 0)");
         console.log("  ---");
         console.log("  Full liquidity:     ", pos.liquidity, "units removed total");
         console.log("  Locked rate:        ", ep.fixedRate / 1e14, "bps annualised");
-        console.log("  Fixed obligation:   ", obligation / 1e18, "tokens (epoch total)");
+        console.log("  Fixed obligation:   ", obligation , "tokens (epoch total)");
         console.log("  ROI (fee / principal):", roiBps, "bps");
         console.log("==============================================================");
         console.log("  Simulation complete. No transactions were broadcast.");

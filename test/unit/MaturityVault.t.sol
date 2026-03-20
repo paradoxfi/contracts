@@ -70,10 +70,10 @@ contract MockPoolManager {
         PoolKey calldata,
         ModifyLiquidityParams calldata params,
         bytes calldata data
-    ) external returns (BalanceDelta) {
+    ) external returns (BalanceDelta callerDelta, BalanceDelta feesAccrued) {
         lastLiquidityDelta = params.liquidityDelta;
         if (data.length >= 32) lastRecipient = abi.decode(data, (address));
-        return toBalanceDelta(0, 0);
+        return (toBalanceDelta(0, 0), toBalanceDelta(0, 0));
     }
 
     function setOperator(address, bool) external {}
@@ -263,7 +263,7 @@ contract MaturityVaultTest is Test {
 
     function test_deploy_zeroHookReverts() public {
         vm.expectRevert(MaturityVault.ZeroAddress.selector);
-        new MaturityVault(OWNER, ROUTER, fyt, vyt,
+        new MaturityVault(address(0), ROUTER, fyt, vyt,
             IPoolManager(address(mockPM)));
     }
 
