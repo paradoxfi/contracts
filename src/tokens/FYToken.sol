@@ -12,29 +12,32 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 /// Token semantics
 /// ─────────────────────────────────────────────────────────────────────────────
 ///
-/// tokenId = epochId (packed uint256 from EpochId library)
+/// tokenId = positionId (packed uint256 from PositionId library)
 ///
-/// All LPs depositing into the same epoch receive FYT with the same tokenId,
-/// making the fixed tranche fungible within an epoch. This maximises secondary
-/// market depth — any two FYT holders in the same epoch hold interchangeable
-/// tokens and can trade without price impact from position-specific attributes.
+/// Each LP deposit receives its own FYT tokenId, making FYT position-unique.
+/// Amount minted = notional / 2 (half the token0-denominated deposit value).
 ///
-/// Amount minted per LP = their notional deposit (token0-denominated).
-/// At redemption, each unit of FYT entitles the holder to:
-///   notional × fytTotal / fytSupplyAtSettle
-/// where fytTotal and fytSupplyAtSettle are set by MaturityVault at settlement.
+/// FYT represents:
+///   • Half of the LP's underlying liquidity principal (redeemable at maturity
+///     by removing liquidity from the v4 pool)
+///   • A pro-rata claim on the fixed fee tranche accumulated during the epoch
+///
+/// Liquidity removal is blocked by the hook until epoch maturity. At maturity:
+///   burning all FYT for a positionId removes 50% of the position's v4 liquidity
+///   and pays the fixed fee yield to the FYT holder.
+///
+/// FYT stores the canonical position metadata — tick range, full liquidity,
+/// halfNotional, and epochId — that both MaturityVault and the hook need to
+/// execute the liquidity removal at redemption time.
 ///
 /// ─────────────────────────────────────────────────────────────────────────────
 /// Access control
 /// ─────────────────────────────────────────────────────────────────────────────
 ///
-///   MINTER_ROLE — PositionManager (mints on LP deposit)
-///   BURNER_ROLE — PositionManager (burns on early exit)
-///                 MaturityVault   (burns on redemption)
+///   MINTER_ROLE — ParadoxHook (mints on afterAddLiquidity)
+///   BURNER_ROLE — MaturityVault (burns on redemption)
 ///
-/// Roles are separate so PositionManager cannot burn redemption-time tokens
-/// and MaturityVault cannot mint. DEFAULT_ADMIN_ROLE is held by the deployer
-/// and should be transferred to a governance multisig post-deployment.
+/// DEFAULT_ADMIN_ROLE held by deployer; should be transferred to governance.
 contract FYToken is ERC1155Supply, AccessControl {
 
     // =========================================================================
@@ -45,6 +48,29 @@ contract FYToken is ERC1155Supply, AccessControl {
     bytes32 public constant BURNER_ROLE = keccak256("BURNER_ROLE");
 
     // =========================================================================
+    // Types
+    // =========================================================================
+
+    /// @notice Position metadata stored at mint time. Used by MaturityVault
+    ///         to execute liquidity removal from the v4 pool at redemption.
+    struct PositionData {
+        /// @notice The v4 pool this position belongs to (as bytes32 PoolId).
+        bytes32 poolId;
+        /// @notice Lower tick of the LP range.
+        int24   tickLower;
+        /// @notice Upper tick of the LP range.
+        int24   tickUpper;
+        /// @notice Full v4 liquidity units of the position at deposit time.
+        ///         Both FYT and VYT remove liquidity/2 each at redemption.
+        uint128 liquidity;
+        /// @notice notional / 2 in token0 units. The principal share that
+        ///         each of FYT and VYT is entitled to at redemption.
+        uint128 halfNotional;
+        /// @notice The epochId this position was opened in.
+        uint256 epochId;
+    }
+
+    // =========================================================================
     // Metadata
     // =========================================================================
 
@@ -52,23 +78,43 @@ contract FYToken is ERC1155Supply, AccessControl {
     string public symbol = "FYT";
 
     // =========================================================================
+    // Storage
+    // =========================================================================
+
+    /// @notice positionId → PositionData. Written once at mint, never updated.
+    mapping(uint256 => PositionData) public positions;
+
+    /// @notice epochId → total FYT positions minted in that epoch.
+    ///         Used by MaturityVault to snapshot supply at settlement.
+    ///         Incremented on mint, decremented on burn.
+    mapping(uint256 => uint256) public epochPositionCount;
+
+    // =========================================================================
+    // Events
+    // =========================================================================
+
+    event PositionRegistered(
+        uint256 indexed positionId,
+        uint256 indexed epochId,
+        bytes32         poolId,
+        uint128         liquidity,
+        uint128         halfNotional
+    );
+
+    // =========================================================================
     // Errors
     // =========================================================================
 
-    error NotMinter();
-    error NotBurner();
+    error PositionAlreadyRegistered(uint256 positionId);
 
     // =========================================================================
     // Constructor
     // =========================================================================
 
-    /// @param admin       Address granted DEFAULT_ADMIN_ROLE. Should be a
-    ///                    governance multisig — can grant/revoke MINTER/BURNER.
-    /// @param minter      PositionManager address.
-    /// @param burners     Addresses granted BURNER_ROLE (PositionManager +
-    ///                    MaturityVault). Passed as an array so both can be
-    ///                    granted atomically at deploy time.
-    /// @param uri_        Base URI for token metadata.
+    /// @param admin    Address granted DEFAULT_ADMIN_ROLE.
+    /// @param minter   ParadoxHook address (granted MINTER_ROLE).
+    /// @param burners  Addresses granted BURNER_ROLE (MaturityVault).
+    /// @param uri_     Base URI for token metadata.
     constructor(
         address          admin,
         address          minter,
@@ -83,45 +129,77 @@ contract FYToken is ERC1155Supply, AccessControl {
     }
 
     // =========================================================================
-    // Mint / Burn
+    // Mint
     // =========================================================================
 
-    /// @notice Mint `amount` FYT to `to` for the given `epochId`.
+    /// @notice Mint FYT for a new LP deposit, storing position metadata.
     ///
-    /// Called by PositionManager when an LP deposits into an active epoch.
-    /// `amount` should equal the LP's token0-denominated notional.
+    /// Called by ParadoxHook in afterAddLiquidity. The positionId is the
+    /// ERC-1155 tokenId. Amount = halfNotional (notional / 2).
     ///
-    /// @param to      Recipient (the LP).
-    /// @param epochId The epoch's packed identifier (= tokenId).
-    /// @param amount  Number of FYT units to mint (= notional).
-    function mint(address to, uint256 epochId, uint256 amount)
-        external
-        onlyRole(MINTER_ROLE)
-    {
-        _mint(to, epochId, amount, "");
+    /// @param to           Recipient (the LP).
+    /// @param positionId   Unique position identifier (= tokenId).
+    /// @param data         Position metadata to store.
+    function mint(
+        address      to,
+        uint256      positionId,
+        PositionData calldata data
+    ) external onlyRole(MINTER_ROLE) {
+        if (positions[positionId].liquidity != 0) {
+            revert PositionAlreadyRegistered(positionId);
+        }
+
+        positions[positionId] = data;
+        epochPositionCount[data.epochId]++;
+
+        _mint(to, positionId, data.halfNotional, "");
+
+        emit PositionRegistered(
+            positionId,
+            data.epochId,
+            data.poolId,
+            data.liquidity,
+            data.halfNotional
+        );
     }
 
-    /// @notice Burn `amount` FYT from `from` for the given `epochId`.
+    // =========================================================================
+    // Burn
+    // =========================================================================
+
+    /// @notice Burn all FYT for a position. Called by MaturityVault at redemption.
     ///
-    /// Called by:
-    ///   • PositionManager — on early exit (before maturity)
-    ///   • MaturityVault   — on redemption (after settlement)
-    ///
-    /// @param from    Token holder whose FYT is burned.
-    /// @param epochId The epoch's packed identifier (= tokenId).
-    /// @param amount  Number of FYT units to burn.
-    function burn(address from, uint256 epochId, uint256 amount)
+    /// @param from       Token holder whose FYT is burned.
+    /// @param positionId The position identifier (= tokenId).
+    /// @param amount     Amount to burn (should equal holderBalance).
+    function burn(address from, uint256 positionId, uint256 amount)
         external
         onlyRole(BURNER_ROLE)
     {
-        _burn(from, epochId, amount);
+        uint256 epochId = positions[positionId].epochId;
+        _burn(from, positionId, amount);
+        // Decrement epoch position count if the tokenId supply reaches zero.
+        if (totalSupply(positionId) == 0 && epochPositionCount[epochId] > 0) {
+            epochPositionCount[epochId]--;
+        }
     }
 
     // =========================================================================
-    // ERC-165 supportsInterface
+    // Views
     // =========================================================================
 
-    /// @inheritdoc ERC1155
+    /// @notice Return position metadata for a given positionId.
+    function getPosition(uint256 positionId)
+        external view
+        returns (PositionData memory)
+    {
+        return positions[positionId];
+    }
+
+    // =========================================================================
+    // ERC-165
+    // =========================================================================
+
     function supportsInterface(bytes4 interfaceId)
         public view override(ERC1155, AccessControl)
         returns (bool)

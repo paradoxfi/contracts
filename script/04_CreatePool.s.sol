@@ -2,23 +2,29 @@
 pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
-import {IERC20}           from "forge-std/interfaces/IERC20.sol";
-import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
+import {IERC20} from "forge-std/interfaces/IERC20.sol";
+import {
+    IAllowanceTransfer
+} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 
-import {IPoolManager}          from "v4-core/interfaces/IPoolManager.sol";
-import {PoolKey}               from "v4-core/types/PoolKey.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "v4-core/types/Currency.sol";
-import {IHooks}                from "v4-core/interfaces/IHooks.sol";
-import {TickMath}              from "v4-core/libraries/TickMath.sol";
-import {StateLibrary}          from "v4-core/libraries/StateLibrary.sol";
+import {IHooks} from "v4-core/interfaces/IHooks.sol";
+import {TickMath} from "v4-core/libraries/TickMath.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 
-import {IPositionManager}      from "v4-periphery/src/interfaces/IPositionManager.sol";
-import {IPoolInitializer_v4}   from "v4-periphery/src/interfaces/IPoolInitializer_v4.sol";
-import {Actions}               from "v4-periphery/src/libraries/Actions.sol";
+import {
+    IPositionManager
+} from "v4-periphery/src/interfaces/IPositionManager.sol";
+import {
+    IPoolInitializer_v4
+} from "v4-periphery/src/interfaces/IPoolInitializer_v4.sol";
+import {Actions} from "v4-periphery/src/libraries/Actions.sol";
 
-import {ParadoxHook}           from "../src/core/ParadoxHook.sol";
-import {FixedDateEpochModel}   from "../src/epochs/FixedDateEpochModel.sol";
+import {ParadoxHook} from "../src/core/ParadoxHook.sol";
+import {FixedDateEpochModel} from "../src/epochs/FixedDateEpochModel.sol";
 
 /// @title CreatePool
 /// @notice Deploys and initializes a Uniswap v4 pool with ParadoxHook.
@@ -78,17 +84,20 @@ import {FixedDateEpochModel}   from "../src/epochs/FixedDateEpochModel.sol";
 ///     --broadcast \
 ///     -vvvv
 contract CreatePool is Script {
-    using PoolIdLibrary    for PoolKey;
-    using CurrencyLibrary  for Currency;
-    using StateLibrary     for IPoolManager;
+    using PoolIdLibrary for PoolKey;
+    using CurrencyLibrary for Currency;
+    using StateLibrary for IPoolManager;
 
     // -------------------------------------------------------------------------
     // Unichain Sepolia (chain ID 1301) V4 contract addresses.
     // Override via env vars POOL_MANAGER / POSITION_MANAGER / PERMIT2 for other chains.
     // -------------------------------------------------------------------------
-    address constant POOL_MANAGER_DEFAULT     = 0x00B036B58a818B1BC34d502D3fE730Db729e62AC;
-    address constant POSITION_MANAGER_DEFAULT = 0xf969Aee60879C54bAAed9F3eD26147Db216Fd664;
-    address constant PERMIT2_DEFAULT          = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+    address constant POOL_MANAGER_DEFAULT =
+        0x00B036B58a818B1BC34d502D3fE730Db729e62AC;
+    address constant POSITION_MANAGER_DEFAULT =
+        0xf969Aee60879C54bAAed9F3eD26147Db216Fd664;
+    address constant PERMIT2_DEFAULT =
+        0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     // v4 uses DYNAMIC_FEE_FLAG when the hook manages fees. Since ParadoxHook
     // does not override fees (hookDelta = 0), we use a static fee tier instead.
@@ -96,7 +105,9 @@ contract CreatePool is Script {
     uint24 constant DEFAULT_FEE = 3000;
 
     uint256 constant DEADLINE_OFFSET = 600; // 10 minutes
-    uint128 constant AMOUNT_MAX      = type(uint128).max;
+    uint128 constant AMOUNT_MAX = type(uint128).max;
+
+    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
 
     // -------------------------------------------------------------------------
     // Config struct — keeps helpers under the 16-slot stack limit
@@ -115,12 +126,12 @@ contract CreatePool is Script {
         // Pool parameters
         Currency currency0;
         Currency currency1;
-        uint24   fee;
-        int24    tickSpacing;
-        uint160  sqrtPriceX96;
-        int24    tickLower;
-        int24    tickUpper;
-        uint256  seedLiquidity;
+        uint24 fee;
+        int24 tickSpacing;
+        uint160 sqrtPriceX96;
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 seedLiquidity;
         // Epoch parameters
         ParadoxHook.InitParams initParams;
         uint256 genesisTwapWad;
@@ -134,11 +145,11 @@ contract CreatePool is Script {
         Config memory cfg = _loadConfig();
 
         poolKey = PoolKey({
-            currency0:   cfg.currency0,
-            currency1:   cfg.currency1,
-            fee:         cfg.fee,
+            currency0: cfg.currency0,
+            currency1: cfg.currency1,
+            fee: cfg.fee,
             tickSpacing: cfg.tickSpacing,
-            hooks:       IHooks(cfg.paradoxHook)
+            hooks: IHooks(cfg.paradoxHook)
         });
         poolId = poolKey.toId();
 
@@ -153,7 +164,10 @@ contract CreatePool is Script {
         console.log("sqrtPriceX96: ", cfg.sqrtPriceX96);
         console.log("ParadoxHook:  ", cfg.paradoxHook);
         console.log("EpochModel:   ", cfg.epochModel);
-        console.log("epochDuration:", uint256(abi.decode(cfg.initParams.modelParams, (uint32))));
+        console.log(
+            "epochDuration:",
+            uint256(abi.decode(cfg.initParams.modelParams, (uint32)))
+        );
         console.log("alphaWad:     ", cfg.initParams.alphaWad);
         console.log("betaWad:      ", cfg.initParams.betaWad);
         console.log("gammaWad:     ", cfg.initParams.gammaWad);
@@ -171,7 +185,12 @@ contract CreatePool is Script {
             cfg.initParams,
             cfg.genesisTwapWad
         );
-        console.log("ParadoxHook.initializePool() called pool registered, epoch opened");
+        console.log(
+            "ParadoxHook.initializePool() called pool registered, epoch opened"
+        );
+
+        bool isReg = ParadoxHook(cfg.paradoxHook).registeredPools(poolId);
+        console.log("IS POOL REG: ", isReg);
 
         // Step 2: Approve token flow through Permit2 -> PositionManager.
         _approvePermit2(cfg);
@@ -195,13 +214,13 @@ contract CreatePool is Script {
 
     function _loadConfig() private view returns (Config memory cfg) {
         cfg.deployerPrivKey = vm.envUint("KEY");
-        cfg.deployer        = vm.addr(cfg.deployerPrivKey);
+        cfg.deployer = vm.addr(cfg.deployerPrivKey);
 
-        cfg.poolManager     = vm.envOr("POOL_MANAGER",     POOL_MANAGER_DEFAULT);
-        cfg.positionManager = vm.envOr("POSITION_MANAGER", POSITION_MANAGER_DEFAULT);
-        cfg.permit2         = vm.envOr("PERMIT2",          PERMIT2_DEFAULT);
-        cfg.paradoxHook     = vm.envAddress("PARADOX_HOOK");
-        cfg.epochModel      = vm.envAddress("EPOCH_MODEL");
+        cfg.poolManager = vm.envOr("POOL_MANAGER", POOL_MANAGER_DEFAULT);
+        cfg.positionManager = POSITION_MANAGER_DEFAULT;
+        cfg.permit2 = vm.envOr("PERMIT2", PERMIT2_DEFAULT);
+        cfg.paradoxHook = vm.envAddress("PARADOX_HOOK");
+        cfg.epochModel = vm.envAddress("EPOCH_MODEL");
 
         // Sort tokens so currency0 < currency1 (v4 invariant).
         address tokenA = vm.envAddress("TOKEN_A");
@@ -213,10 +232,10 @@ contract CreatePool is Script {
         cfg.currency1 = Currency.wrap(token1);
 
         // Pool parameters.
-        cfg.fee          = uint24(vm.envOr("POOL_FEE",      uint256(DEFAULT_FEE)));
-        cfg.tickSpacing  = int24(int256(vm.envOr("TICK_SPACING", uint256(60))));
-        cfg.sqrtPriceX96 = uint160(vm.envOr("SQRT_PRICE",   uint256(79228162514264337593543950336)));
-        cfg.seedLiquidity = vm.envOr("SEED_LIQUIDITY",      uint256(100_000e18));
+        cfg.fee = uint24(vm.envOr("POOL_FEE", uint256(DEFAULT_FEE)));
+        cfg.tickSpacing = int24(int256(vm.envOr("TICK_SPACING", uint256(60))));
+        cfg.sqrtPriceX96 = SQRT_PRICE_1_1;
+        cfg.seedLiquidity = vm.envOr("SEED_LIQUIDITY", uint256(100_000e18));
 
         // Compute full-range tick bounds for this tick spacing.
         // TickMath.minUsableTick / maxUsableTick rounds to the nearest valid tick.
@@ -224,14 +243,16 @@ contract CreatePool is Script {
         cfg.tickUpper = TickMath.maxUsableTick(cfg.tickSpacing);
 
         // Epoch / rate parameters.
-        uint32 epochDuration = uint32(vm.envOr("EPOCH_DURATION", uint256(30 days)));
+        uint32 epochDuration = uint32(
+            vm.envOr("EPOCH_DURATION", uint256(30 days))
+        );
 
         cfg.initParams = ParadoxHook.InitParams({
-            model:       cfg.epochModel,
+            model: cfg.epochModel,
             modelParams: abi.encode(epochDuration),
-            alphaWad:    vm.envOr("ALPHA_WAD", uint256(0.80e18)),
-            betaWad:     vm.envOr("BETA_WAD",  uint256(0.30e18)),
-            gammaWad:    vm.envOr("GAMMA_WAD", uint256(0.15e18))
+            alphaWad: vm.envOr("ALPHA_WAD", uint256(0.80e18)),
+            betaWad: vm.envOr("BETA_WAD", uint256(0.30e18)),
+            gammaWad: vm.envOr("GAMMA_WAD", uint256(0.15e18))
         });
 
         // Genesis TWAP: the fixed rate for the first epoch. The oracle has no
@@ -249,8 +270,14 @@ contract CreatePool is Script {
     // -------------------------------------------------------------------------
 
     function _approvePermit2(Config memory cfg) private {
-        IERC20(Currency.unwrap(cfg.currency0)).approve(cfg.permit2, type(uint256).max);
-        IERC20(Currency.unwrap(cfg.currency1)).approve(cfg.permit2, type(uint256).max);
+        IERC20(Currency.unwrap(cfg.currency0)).approve(
+            cfg.permit2,
+            type(uint256).max
+        );
+        IERC20(Currency.unwrap(cfg.currency1)).approve(
+            cfg.permit2,
+            type(uint256).max
+        );
         console.log("Permit2 approved for both tokens");
     }
 
@@ -274,24 +301,13 @@ contract CreatePool is Script {
     // Pool initialization + liquidity seeding (single multicall)
     // -------------------------------------------------------------------------
 
-    function _initializeAndSeed(PoolKey memory poolKey, Config memory cfg) private {
+    function _initializeAndSeed(
+        PoolKey memory poolKey,
+        Config memory cfg
+    ) private {
         bytes[] memory multicallData = new bytes[](2);
 
-        // Action 1: Initialize the v4 pool.
-        // Pool registration was already done by hook.initializePool() above.
-        // afterInitialize fires but is a no-op -- no hookData needed.
-        multicallData[0] = abi.encodeWithSelector(
-            IPoolInitializer_v4.initializePool.selector,
-            poolKey,
-            cfg.sqrtPriceX96,
-            bytes("")  // hookData -- empty, afterInitialize is a no-op
-        );
-
-        // Action 2: Mint a full-range seed position.
-        // afterAddLiquidity fires, which:
-        //   positionManager.mint()  — mints ERC-721 position NFT to deployer
-        //   epochManager.addNotional()
-        //   fyt.mint() / vyt.mint()  — mints FYT + VYT to deployer
+        multicallData[0] = _encodeInitialize(poolKey);
         multicallData[1] = _encodeMintLiquidity(poolKey, cfg);
 
         IPositionManager(cfg.positionManager).multicall(multicallData);
@@ -299,11 +315,21 @@ contract CreatePool is Script {
         console.log("v4 pool initialized and seed liquidity added");
     }
 
-    function _encodeMintLiquidity(PoolKey memory poolKey, Config memory cfg)
-        private
-        view
-        returns (bytes memory)
-    {
+    function _encodeInitialize(
+        PoolKey memory poolKey
+    ) private pure returns (bytes memory) {
+        return
+            abi.encodeWithSelector(
+                IPoolInitializer_v4.initializePool.selector,
+                poolKey,
+                SQRT_PRICE_1_1
+            );
+    }
+
+    function _encodeMintLiquidity(
+        PoolKey memory poolKey,
+        Config memory cfg
+    ) private view returns (bytes memory) {
         bytes memory actions = abi.encodePacked(
             uint8(Actions.MINT_POSITION),
             uint8(Actions.SETTLE_PAIR)
@@ -318,20 +344,21 @@ contract CreatePool is Script {
             cfg.tickLower,
             cfg.tickUpper,
             cfg.seedLiquidity,
-            AMOUNT_MAX,           // amount0Max — slippage guard (max)
-            AMOUNT_MAX,           // amount1Max — slippage guard (max)
-            cfg.deployer,         // recipient of the position NFT
-            bytes("")             // hookData (not used by afterAddLiquidity)
+            AMOUNT_MAX, // amount0Max — slippage guard (max)
+            AMOUNT_MAX, // amount1Max — slippage guard (max)
+            cfg.deployer, // recipient of the position NFT
+            abi.encode(cfg.deployer)  // hookData — tells the hook who the real recipient is
         );
 
         // SETTLE_PAIR params — pays both tokens from deployer.
         params[1] = abi.encode(cfg.currency0, cfg.currency1);
 
-        return abi.encodeWithSelector(
-            IPositionManager.modifyLiquidities.selector,
-            abi.encode(actions, params),
-            block.timestamp + DEADLINE_OFFSET
-        );
+        return
+            abi.encodeWithSelector(
+                IPositionManager.modifyLiquidities.selector,
+                abi.encode(actions, params),
+                block.timestamp + DEADLINE_OFFSET
+            );
     }
 
     // -------------------------------------------------------------------------
@@ -340,11 +367,13 @@ contract CreatePool is Script {
 
     function _verify(
         PoolKey memory /* poolKey */,
-        PoolId         poolId,
-        Config memory  cfg
+        PoolId poolId,
+        Config memory cfg
     ) private view {
         // Verify the pool is live in PoolManager.
-        (uint160 sqrtPriceX96,,,) = IPoolManager(cfg.poolManager).getSlot0(poolId);
+        (uint160 sqrtPriceX96, , , ) = IPoolManager(cfg.poolManager).getSlot0(
+            poolId
+        );
         require(sqrtPriceX96 != 0, "CreatePool: pool not initialised");
 
         // Verify ParadoxHook registered the pool.
@@ -355,7 +384,9 @@ contract CreatePool is Script {
 
         // Verify EpochManager has an active epoch for the pool.
         require(
-            ParadoxHook(payable(cfg.paradoxHook)).epochManager().hasActiveEpoch(poolId),
+            ParadoxHook(payable(cfg.paradoxHook)).epochManager().hasActiveEpoch(
+                poolId
+            ),
             "CreatePool: no active epoch after initialisation"
         );
 
@@ -376,7 +407,11 @@ contract CreatePool is Script {
         console.log("  - LPs add liquidity: FYT + VYT minted automatically.");
         console.log("  - After epoch maturity, keeper calls:");
         console.log("      EpochManager.settle(epochId, twap, vol, 0)");
-        console.log("      YieldRouter.finalizeEpoch(epochId, poolId, token, obligation)");
-        console.log("  - FYT/VYT holders call MaturityVault.redeemFYT/redeemVYT.");
+        console.log(
+            "      YieldRouter.finalizeEpoch(epochId, poolId, token, obligation)"
+        );
+        console.log(
+            "  - FYT/VYT holders call MaturityVault.redeemFYT/redeemVYT."
+        );
     }
 }

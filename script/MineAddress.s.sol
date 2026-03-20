@@ -13,19 +13,21 @@ contract ParadoxHookAddressMiner is Script {
 
     function run() external view {
         address epochManager = vm.envAddress("EPOCH_MANAGER");
-        address positionManager = vm.envAddress("POSITION_MANAGER");
         address yieldRouter = vm.envAddress("YIELD_ROUTER");
         address rateOracle = vm.envAddress("RATE_ORACLE");
         address sender = vm.envAddress("SENDER");
+        address fyt = vm.envAddress("FYT");
+        address vyt = vm.envAddress("VYT");
 
         bytes memory initCode = abi.encodePacked(
             type(ParadoxHook).creationCode,
             abi.encode(
                 POOL_MANAGER_ADDRESS,
                 epochManager,
-                positionManager,
                 yieldRouter,
                 rateOracle,
+                fyt,
+                vyt,
                 sender
             )
         );

@@ -21,7 +21,7 @@ test:
 	forge test
 
 mine-hook-addr:
-	forge script script/MineAddress.s.sol:SuperHookAddressMiner
+	forge script script/MineAddress.s.sol:ParadoxHookAddressMiner
 
 test-deploy-tokens:
 	forge script script/01_DeployTokens.s.sol:DeployTokens --rpc-url $(RPC_URL) --sender $(SENDER) --etherscan-api-key $(API_KEY)
@@ -31,6 +31,9 @@ deploy-tokens:
 
 test-deploy-core:
 	forge script script/02_DeployCore.s.sol:DeployCore --rpc-url $(RPC_URL) --sender $(SENDER) --etherscan-api-key $(API_KEY)
+
+deploy-core:
+	forge script script/02_DeployCore.s.sol:DeployCore --rpc-url $(RPC_URL) --sender $(SENDER) --etherscan-api-key $(API_KEY)  --verify --broadcast
 
 test-deploy-paradox:
 	forge script script/03_DeployParadoxFi.s.sol:DeployParadoxFi --rpc-url $(RPC_URL) --sender $(SENDER) --etherscan-api-key $(API_KEY)

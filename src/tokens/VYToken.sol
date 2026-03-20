@@ -5,6 +5,8 @@ import {ERC1155}       from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import {ERC1155Supply} from "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Supply.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
+import {FYToken} from "./FYToken.sol";
+
 /// @title VYToken
 /// @notice ERC-1155 Variable Yield Token for the Paradox Fi protocol.
 ///
@@ -12,50 +14,27 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 /// Token semantics
 /// ─────────────────────────────────────────────────────────────────────────────
 ///
-/// tokenId = positionId (packed uint256 from PositionId library)
+/// tokenId = positionId (same positionId used for FYToken)
+/// Amount  = 1 (always exactly one VYT per position)
 ///
-/// Each LP position receives a unique VYT tokenId — VYT is non-fungible within
-/// the ERC-1155 scheme. Amount is always exactly 1 per position. This means
-/// VYT behaves like an ERC-721 in economic terms (one token per LP deposit)
-/// while remaining ERC-1155 for gas efficiency and composability with the
-/// MaturityVault redemption flow.
+/// VYT represents:
+///   • The other half of the LP's underlying liquidity principal
+///   • A pro-rata claim on the variable fee tranche (Zone A only)
 ///
-/// At settlement the VYT holder receives:
-///   vytTotal / vytSupplyAtSettle
-/// where vytTotal and vytSupplyAtSettle are set by MaturityVault. Since each
-/// position has amount=1 and the supply equals the count of active positions
-/// in the epoch, this is a flat per-position split of the variable tranche.
+/// At epoch maturity:
+///   burning VYT for a positionId removes the remaining 50% of the position's
+///   v4 liquidity and pays variable fee yield (or zero in Zone B/C).
 ///
-/// VYT is fully transferable — the holder at settlement time receives the
-/// payout, not the original minter. This allows LPs to sell their variable
-/// upside independently of the fixed-income NFT.
+/// VYToken reads position metadata from FYToken — the single source of truth
+/// for position data. This avoids duplicating storage and ensures consistency
+/// between the two tokens for the same position.
 ///
 /// ─────────────────────────────────────────────────────────────────────────────
 /// Access control
 /// ─────────────────────────────────────────────────────────────────────────────
 ///
-///   MINTER_ROLE — PositionManager (mints exactly 1 on LP deposit)
-///   BURNER_ROLE — PositionManager (burns on early exit)
-///                 MaturityVault   (burns on redemption)
-///
-/// DEFAULT_ADMIN_ROLE should be transferred to governance post-deployment.
-///
-/// ─────────────────────────────────────────────────────────────────────────────
-/// epochId tracking
-/// ─────────────────────────────────────────────────────────────────────────────
-///
-/// MaturityVault.receiveSettlement() snapshots `totalSupply(epochId)` to get
-/// the count of VYT positions in the epoch. Since VYT tokenIds are positionIds
-/// (not epochIds), we maintain a separate mapping: epochId → total minted count.
-/// This is what MaturityVault queries as `totalSupply(epochId)`.
-///
-/// We implement this by overriding totalSupply(uint256 id) to serve both:
-///   • totalSupply(positionId) — returns 0 or 1 (standard ERC1155Supply)
-///   • totalSupply(epochId)    — returns count of positions in that epoch
-///
-/// Since positionIds and epochIds are both packed uint256s with chainId in the
-/// upper bits, they occupy the same namespace. We track epoch-level supply in a
-/// separate mapping to avoid collision.
+///   MINTER_ROLE — ParadoxHook (mints on afterAddLiquidity)
+///   BURNER_ROLE — MaturityVault (burns on redemption)
 contract VYToken is ERC1155Supply, AccessControl {
 
     // =========================================================================
@@ -73,118 +52,81 @@ contract VYToken is ERC1155Supply, AccessControl {
     string public symbol = "VYT";
 
     // =========================================================================
-    // Epoch supply tracking
+    // Storage
     // =========================================================================
 
-    /// @notice Count of VYT positions minted for a given epochId.
-    ///         Incremented on mint, decremented on burn.
-    ///         Queried by MaturityVault.receiveSettlement() as the VYT supply
-    ///         denominator for pro-rata payouts.
-    mapping(uint256 => uint256) public epochSupply;
-
-    // =========================================================================
-    // Errors
-    // =========================================================================
-
-    error AmountMustBeOne(uint256 amount);
+    /// @notice Canonical position data lives in FYToken. VYToken reads from it.
+    FYToken public immutable fyToken;
 
     // =========================================================================
     // Constructor
     // =========================================================================
 
     /// @param admin    Address granted DEFAULT_ADMIN_ROLE.
-    /// @param minter   PositionManager address.
-    /// @param burners  Addresses granted BURNER_ROLE (PositionManager + MaturityVault).
+    /// @param minter   ParadoxHook address.
+    /// @param burners  Addresses granted BURNER_ROLE (MaturityVault).
     /// @param uri_     Base URI for token metadata.
+    /// @param _fyToken FYToken address — source of position metadata.
     constructor(
         address          admin,
         address          minter,
         address[] memory burners,
-        string memory    uri_
+        string memory    uri_,
+        FYToken          _fyToken
     ) ERC1155(uri_) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(MINTER_ROLE, minter);
         for (uint256 i = 0; i < burners.length; i++) {
             _grantRole(BURNER_ROLE, burners[i]);
         }
+        fyToken = _fyToken;
     }
 
     // =========================================================================
-    // Mint / Burn
+    // Mint
     // =========================================================================
 
-    /// @notice Mint exactly 1 VYT to `to` for the given `positionId`.
+    /// @notice Mint exactly 1 VYT for a position.
     ///
-    /// Called by PositionManager when an LP deposits. Each position receives
-    /// exactly one VYT. Also increments the epoch-level supply counter so
-    /// MaturityVault can snapshot the correct denominator at settlement.
+    /// Position metadata is stored in FYToken — VYToken.mint() does not
+    /// accept or store it separately. FYToken.mint() must be called first
+    /// for the same positionId so the data is available.
     ///
     /// @param to         Recipient (the LP).
-    /// @param positionId The position's packed identifier (= tokenId).
-    /// @param epochId    The epoch this position belongs to (for supply tracking).
-    function mint(address to, uint256 positionId, uint256 epochId)
+    /// @param positionId The position identifier (= tokenId).
+    function mint(address to, uint256 positionId)
         external
         onlyRole(MINTER_ROLE)
     {
         _mint(to, positionId, 1, "");
-        epochSupply[epochId]++;
     }
 
-    /// @notice Burn the VYT for a given `positionId`.
+    // =========================================================================
+    // Burn
+    // =========================================================================
+
+    /// @notice Burn the VYT for a position. Called by MaturityVault at redemption.
     ///
-    /// Called by:
-    ///   • PositionManager — on early exit (before maturity)
-    ///   • MaturityVault   — on redemption (after settlement)
-    ///
-    /// Also decrements the epoch-level supply counter.
-    ///
-    /// @param from       Token holder whose VYT is burned.
-    /// @param positionId The position's packed identifier (= tokenId).
-    /// @param epochId    The epoch this position belongs to (for supply tracking).
-    function burn(address from, uint256 positionId, uint256 epochId)
+    /// @param from       Token holder.
+    /// @param positionId The position identifier (= tokenId).
+    function burn(address from, uint256 positionId)
         external
         onlyRole(BURNER_ROLE)
     {
         _burn(from, positionId, 1);
-        if (epochSupply[epochId] > 0) epochSupply[epochId]--;
     }
 
     // =========================================================================
-    // totalSupply override for MaturityVault compatibility
+    // Position metadata passthrough
     // =========================================================================
 
-    /// @notice Return the supply for a given id.
-    ///
-    /// MaturityVault calls `totalSupply(epochId)` to snapshot the VYT
-    /// denominator at settlement. Since VYT tokenIds are positionIds (not
-    /// epochIds), the inherited ERC1155Supply.totalSupply(epochId) would return
-    /// 0. We override to check epochSupply first.
-    ///
-    /// For positionIds: delegates to ERC1155Supply (returns 0 or 1).
-    /// For epochIds:    returns epochSupply[id].
-    ///
-    /// Because both positionIds and epochIds embed chainId + poolId in the same
-    /// bit positions, there is no overlap between a valid positionId (counter ≥ 1)
-    /// and a valid epochId (epochIndex field) — the fields occupy the same lower
-    /// 32 bits but their upper structure is identical. In practice, MaturityVault
-    /// always calls with epochId and PositionManager always calls with positionId,
-    /// so the caller context disambiguates. We serve epochSupply when the
-    /// ERC1155Supply returns 0 and epochSupply is non-zero.
-    ///
-    /// @dev This works because a valid positionId always has a non-zero lower
-    ///      32-bit counter (PositionId encodes counter ≥ 1), while a valid
-    ///      epochId has a non-zero lower 32-bit epochIndex OR epochIndex = 0
-    ///      for the first epoch. The safest and simplest implementation is:
-    ///      return max(ERC1155Supply.totalSupply(id), epochSupply[id]).
-    function totalSupply(uint256 id)
-        public view override
-        returns (uint256)
+    /// @notice Return position metadata by reading from FYToken.
+    ///         Convenience function so callers only need VYToken's address.
+    function getPosition(uint256 positionId)
+        external view
+        returns (FYToken.PositionData memory)
     {
-        uint256 tokenSupply = super.totalSupply(id);
-        uint256 epochCount  = epochSupply[id];
-        // Return whichever is larger — for positionIds this is tokenSupply (0 or 1),
-        // for epochIds this is epochCount (number of positions in that epoch).
-        return tokenSupply > epochCount ? tokenSupply : epochCount;
+        return fyToken.getPosition(positionId);
     }
 
     // =========================================================================

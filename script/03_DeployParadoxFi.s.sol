@@ -9,7 +9,6 @@ import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 
 import {EpochManager} from "../src/core/EpochManager.sol";
-import {PositionManager} from "../src/core/PositionManager.sol";
 import {YieldRouter} from "../src/core/YieldRouter.sol";
 import {MaturityVault} from "../src/core/MaturityVault.sol";
 import {RateOracle} from "../src/core/RateOracle.sol";
@@ -26,26 +25,12 @@ contract DeployParadoxFi is Script {
 
     FixedDateEpochModel public fixedDateModel;
     EpochManager public epochManager;
-    PositionManager public positionManager;
     RateOracle public rateOracle;
     YieldRouter public yieldRouter;
     FYToken public fyToken;
     VYToken public vyToken;
     MaturityVault public maturityVault;
     ParadoxHook public hook;
-
-    // =========================================================================
-    // Required permission flag mask for the hook address.
-    // Flags: afterInitialize(12) | afterAddLiquidity(10) |
-    //        beforeRemoveLiquidity(9) | afterSwap(6) = 0x1640
-    // =========================================================================
-    uint160 internal constant HOOK_FLAGS =
-        uint160(
-            Hooks.AFTER_INITIALIZE_FLAG |
-                Hooks.AFTER_ADD_LIQUIDITY_FLAG |
-                Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG |
-                Hooks.AFTER_SWAP_FLAG
-        );
 
     function run() external {
         // ── Step 9: ParadoxHook (CREATE2) ─────────────────────────────────────
@@ -65,33 +50,27 @@ contract DeployParadoxFi is Script {
         uint256 salt = vm.envUint("SALT");
         console2.log("SALT: ", salt);
 
-        address deployer = vm.envAddress("DEPLOYER");
+        uint256 deployerPrivKey = vm.envUint("KEY");
+        address deployer = vm.addr(deployerPrivKey);
+        vm.startBroadcast(deployerPrivKey);
 
         uint256 bufferSkimRate = vm.envOr("BUFFER_SKIM_RATE", uint256(0.10e18));
 
         hook = new ParadoxHook{salt: bytes32(salt)}({
             _poolManager: IPoolManager(POOL_MANAGER_ADDRESS),
             _epochManager: epochManager,
-            _positionManager: positionManager,
             _yieldRouter: yieldRouter,
             _rateOracle: rateOracle,
+            _fyt: fyToken,
+            _vyt: vyToken,
             _owner: deployer
         });
 
         console2.log("ParadoxHook:          ", address(hook));
 
-        // Verify the hook address has the correct flags in its lower bits.
-        // This will revert if the salt was mined incorrectly.
-        require(
-            uint160(address(hook)) & uint160(type(uint16).max) ==
-                uint16(HOOK_FLAGS),
-            "Deploy: hook address does not encode correct permission flags"
-        );
-
         // ── Step 10: Wire authorizedCaller on core contracts ──────────────────
 
         epochManager.setAuthorizedCaller(address(hook));
-        positionManager.setAuthorizedCaller(address(hook));
         rateOracle.setAuthorizedCaller(address(hook));
         yieldRouter.setAuthorizedCaller(address(hook));
 
@@ -144,9 +123,8 @@ contract DeployParadoxFi is Script {
     }
 
     function _setCore() internal {
-        fixedDateModel = FixedDateEpochModel(vm.envAddress("FIXED_RATE_MODEL"));
+        fixedDateModel = FixedDateEpochModel(vm.envAddress("EPOCH_MODEL"));
         epochManager = EpochManager(vm.envAddress("EPOCH_MANAGER"));
-        positionManager = PositionManager(vm.envAddress("POSITION_MANAGER"));
         rateOracle = RateOracle(vm.envAddress("RATE_ORACLE"));
         yieldRouter = YieldRouter(vm.envAddress("YIELD_ROUTER"));
         fyToken = FYToken(vm.envAddress("FYT"));

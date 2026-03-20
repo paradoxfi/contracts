@@ -9,15 +9,12 @@ import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 
 import {EpochManager} from "../src/core/EpochManager.sol";
-import {PositionManager} from "../src/core/PositionManager.sol";
 import {YieldRouter} from "../src/core/YieldRouter.sol";
 import {MaturityVault} from "../src/core/MaturityVault.sol";
 import {RateOracle} from "../src/core/RateOracle.sol";
 import {ParadoxHook} from "../src/core/ParadoxHook.sol";
 import {FYToken} from "../src/tokens/FYToken.sol";
 import {VYToken} from "../src/tokens/VYToken.sol";
-import {IFYToken} from "../src/interfaces/IFYToken.sol";
-import {IVYToken} from "../src/interfaces/IVYToken.sol";
 import {FixedDateEpochModel} from "../src/epochs/FixedDateEpochModel.sol";
 
 /// @title Deploy
@@ -59,7 +56,6 @@ import {FixedDateEpochModel} from "../src/epochs/FixedDateEpochModel.sol";
 ///
 ///   1.  FixedDateEpochModel   — stateless, no dependencies
 ///   2.  EpochManager          — depends on: nothing (hook wired after)
-///   3.  PositionManager       — depends on: nothing (hook wired after)
 ///   4.  RateOracle            — depends on: nothing (hook wired after)
 ///   5.  YieldRouter           — depends on: EpochManager
 ///   6.  FYToken               — depends on: PositionManager (minter),
@@ -114,7 +110,6 @@ contract DeployCore is Script {
 
     FixedDateEpochModel public fixedDateModel;
     EpochManager public epochManager;
-    PositionManager public positionManager;
     RateOracle public rateOracle;
     YieldRouter public yieldRouter;
     FYToken public fyToken;
@@ -131,9 +126,10 @@ contract DeployCore is Script {
 
     function run() external {
         // ── Read environment ──────────────────────────────────────────────────
+        uint256 deployerPrivKey = vm.envUint("KEY");
+        address deployer = vm.addr(deployerPrivKey);
 
         address poolManager = POOL_MANAGER_ADDRESS;
-        address deployer = vm.envAddress("DEPLOYER");
         address governance = vm.envAddress("GOVERNANCE");
 
         string memory fytUri = vm.envOr(
@@ -170,7 +166,6 @@ contract DeployCore is Script {
             abi.encode(
                 IPoolManager(poolManager),
                 address(0), // epochManager — placeholder, replaced below
-                address(0), // positionManager — placeholder
                 address(0), // yieldRouter — placeholder
                 address(0), // rateOracle — placeholder
                 deployer
@@ -184,7 +179,7 @@ contract DeployCore is Script {
 
         // ── Begin broadcast ───────────────────────────────────────────────────
 
-        vm.startBroadcast(deployer);
+        vm.startBroadcast(deployerPrivKey);
 
         // ── Step 1: FixedDateEpochModel ───────────────────────────────────────
 
@@ -199,14 +194,6 @@ contract DeployCore is Script {
             _authorizedCaller: address(0)
         });
         console2.log("EpochManager:         ", address(epochManager));
-
-        // ── Step 3: PositionManager ───────────────────────────────────────────
-
-        positionManager = new PositionManager({
-            _owner: deployer,
-            _authorizedCaller: address(0)
-        });
-        console2.log("PositionManager:      ", address(positionManager));
 
         // ── Step 4: RateOracle ────────────────────────────────────────────────
 
@@ -251,7 +238,8 @@ contract DeployCore is Script {
             admin: deployer,
             minter: deployer, // overridden in wiring phase
             burners: emptyBurners,
-            uri_: vytUri
+            uri_: vytUri,
+            _fyToken: fyToken
         });
         console2.log("VYToken:              ", address(vyToken));
 
@@ -260,8 +248,9 @@ contract DeployCore is Script {
         maturityVault = new MaturityVault({
             _owner: deployer,
             _authorizedCaller: address(0), // set to yieldRouter in wiring phase
-            _fyToken: IFYToken(address(fyToken)),
-            _vyToken: IVYToken(address(vyToken))
+            _fyToken: FYToken(address(fyToken)),
+            _vyToken: VYToken(address(vyToken)),
+            _poolManager: IPoolManager(POOL_MANAGER_ADDRESS)
         });
         console2.log("MaturityVault:        ", address(maturityVault));
 
@@ -277,7 +266,6 @@ contract DeployCore is Script {
 
         if (governance != deployer) {
             epochManager.transferOwnership(governance);
-            positionManager.transferOwnership(governance);
             rateOracle.transferOwnership(governance);
             yieldRouter.transferOwnership(governance);
             maturityVault.transferOwnership(governance);
@@ -333,7 +321,6 @@ contract DeployCore is Script {
         console2.log("------------------------------------------------------");
         console2.log("FixedDateEpochModel: ", address(fixedDateModel));
         console2.log("EpochManager:        ", address(epochManager));
-        console2.log("PositionManager:     ", address(positionManager));
         console2.log("RateOracle:          ", address(rateOracle));
         console2.log("YieldRouter:         ", address(yieldRouter));
         console2.log("FYToken:             ", address(fyToken));
