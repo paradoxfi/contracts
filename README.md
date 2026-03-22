@@ -13,6 +13,12 @@ Paradox Fi is a Uniswap v4 hook protocol that splits LP fee streams into two tra
 
 LPs deposit into v4 pools as normal. The hook intercepts each deposit, mints FYT and VYT atomically to the LP, and routes all swap fees through a priority waterfall. At epoch maturity, FYT and VYT holders redeem independently — each token removes half the position's v4 liquidity plus its respective fee tranche.
 
+> [!WARNING]
+> **Unaudited Smart Contracts**
+> 
+> This repository contains smart contracts that have **not** been audited. 
+> Do **not** use in production environments until a formal security audit has been completed.
+
 ---
 
 ## Table of Contents
