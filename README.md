@@ -6,6 +6,8 @@
 
 **Fixed-income infrastructure for Uniswap v4 liquidity providers.**
 
+Visit [demo.paradoxfi.xyz](https://demo.paradoxfi.xyz) for a Unichain Testnet demo.
+
 Paradox Fi is a Uniswap v4 hook protocol that splits LP fee streams into two tradeable instruments, each also representing half of the LP's underlying liquidity principal:
 
 - **FYT (Fixed Yield Token)** — ERC-1155, `tokenId = positionId`, `amount = halfNotional`. Entitles the holder to half the LP's v4 liquidity principal plus a guaranteed fixed fee yield at epoch maturity.
